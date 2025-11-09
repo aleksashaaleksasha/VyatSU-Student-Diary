@@ -1,50 +1,74 @@
-import React, { useState } from 'react';
+// src/screens/SettingsScreen.tsx
+import React, { useState, useEffect } from 'react';
 import { View, StyleSheet, ScrollView } from 'react-native';
-import { Card, Title, Paragraph, Switch, List, Button, Menu, Divider } from 'react-native-paper';
+import { Card, Title, Paragraph, Switch, List, Button, Divider, Chip } from 'react-native-paper';
+import { useNavigation } from '@react-navigation/native';
+import * as SQLite from 'expo-sqlite';
+
+const db = SQLite.openDatabaseSync('student_diary.db');
 
 const SettingsScreen = () => {
-    const [notifications, setNotifications] = useState(true);
-    const [deadlineReminders, setDeadlineReminders] = useState(true);
-    const [scheduleChanges, setScheduleChanges] = useState(true);
-    const [menuVisible, setMenuVisible] = useState(false);
+    const [notifications, setNotifications] = React.useState(true);
+    const [deadlineReminders, setDeadlineReminders] = React.useState(true);
+    const [scheduleChanges, setScheduleChanges] = React.useState(true);
+    const [userGroup, setUserGroup] = React.useState('');
+    const navigation = useNavigation();
+
+    useEffect(() => {
+        loadUserGroup();
+    }, []);
+
+    const loadUserGroup = () => {
+        try {
+            const result = db.getFirstSync('SELECT value FROM settings WHERE key = "user_group"') as any;
+            if (result) {
+                setUserGroup(result.value);
+            }
+        } catch (error) {
+            console.log('Error loading user group:', error);
+        }
+    };
 
     return (
         <ScrollView style={styles.container}>
+            {/* Добавляем карточку выбора группы */}
+            <Card style={styles.card}>
+                <Card.Content>
+                    <Title>Учебная группа</Title>
+                    <Paragraph>Выберите вашу учебную группу для корректного отображения расписания</Paragraph>
+
+                    {userGroup ? (
+                        <Chip mode="outlined" style={styles.groupChip}>
+                            {userGroup}
+                        </Chip>
+                    ) : (
+                        <Paragraph style={styles.noGroupText}>Группа не выбрана</Paragraph>
+                    )}
+
+                    <Button
+                        mode="outlined"
+                        icon="account-group"
+                        onPress={() => navigation.navigate('GroupSelect' as never)}
+                        style={styles.button}
+                    >
+                        {userGroup ? 'Изменить группу' : 'Выбрать группу'}
+                    </Button>
+                </Card.Content>
+            </Card>
+
             <Card style={styles.card}>
                 <Card.Content>
                     <Title>Импорт расписания</Title>
-                    <Paragraph>Загрузите расписание из различных источников</Paragraph>
+                    <Paragraph>Загрузите расписание из Excel файла</Paragraph>
 
-                    <Menu
-                        visible={menuVisible}
-                        onDismiss={() => setMenuVisible(false)}
-                        anchor={
-                            <Button
-                                mode="outlined"
-                                onPress={() => setMenuVisible(true)}
-                                style={styles.button}
-                            >
-                                Выбрать источник импорта
-                            </Button>
-                        }
+                    <Button
+                        mode="contained"
+                        icon="file-import"
+                        onPress={() => navigation.navigate('Import' as never)}
+                        style={styles.button}
                     >
-                        <Menu.Item
-                            onPress={() => {
-                                setMenuVisible(false);
-                                console.log('Import from phone');
-                            }}
-                            title="Из памяти телефона"
-                            leadingIcon="file-import"
-                        />
-                        <Menu.Item
-                            onPress={() => {
-                                setMenuVisible(false);
-                                console.log('Import from VK');
-                            }}
-                            title="Из группы ВКонтакте"
-
-                        />
-                    </Menu>
+                        Импорт из Excel
+                    </Button>
                 </Card.Content>
             </Card>
 
@@ -121,6 +145,15 @@ const styles = StyleSheet.create({
     },
     button: {
         marginVertical: 4,
+    },
+    groupChip: {
+        alignSelf: 'flex-start',
+        marginBottom: 12,
+    },
+    noGroupText: {
+        fontStyle: 'italic',
+        color: '#666',
+        marginBottom: 12,
     },
 });
 

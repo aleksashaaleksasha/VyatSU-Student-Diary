@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { View, StyleSheet, FlatList } from 'react-native';
-import { Card, Title, Text, FAB, Chip, Button } from 'react-native-paper';
+import { View, StyleSheet, FlatList, Platform } from 'react-native';
+import { Card, Title, Text, FAB, Chip, Button, Modal, Portal, TextInput, Provider as PaperProvider } from 'react-native-paper';
 import { format, isAfter, isToday, isTomorrow } from 'date-fns';
 import { ru } from 'date-fns/locale';
+import DateTimePicker from '@react-native-community/datetimepicker';
 
 const NotesScreen = () => {
     const [notes, setNotes] = useState([
@@ -48,6 +49,59 @@ const NotesScreen = () => {
         },
     ]);
 
+    const [visible, setVisible] = useState(false);
+    const [showDatePicker, setShowDatePicker] = useState(false);
+    const [selectedDate, setSelectedDate] = useState(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)); // +7 дней по умолчанию
+    const [newNote, setNewNote] = useState({
+        title: '',
+        content: '',
+        subject: '',
+    });
+
+    const showModal = () => setVisible(true);
+    const hideModal = () => {
+        setVisible(false);
+        setNewNote({
+            title: '',
+            content: '',
+            subject: '',
+        });
+        setSelectedDate(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000));
+    };
+
+    const onDateChange = (event: any, date?: Date) => {
+        if (Platform.OS === 'android') {
+            setShowDatePicker(false);
+        }
+        if (date) {
+            setSelectedDate(date);
+        }
+    };
+
+    const showDatepicker = () => {
+        setShowDatePicker(true);
+    };
+
+    const addNote = () => {
+        if (!newNote.title.trim() || !newNote.content.trim() || !newNote.subject.trim()) {
+            return;
+        }
+
+        const note = {
+            id: Date.now().toString(),
+            title: newNote.title.trim(),
+            content: newNote.content.trim(),
+            subject: newNote.subject.trim(),
+            deadline: format(selectedDate, 'yyyy-MM-dd'),
+            createdAt: format(new Date(), 'yyyy-MM-dd'),
+            important: false,
+            completed: false,
+        };
+
+        setNotes(prevNotes => [note, ...prevNotes]);
+        hideModal();
+    };
+
     const sortedNotes = [...notes].sort((a, b) => {
         if (a.important && !b.important) return -1;
         if (!a.important && b.important) return 1;
@@ -86,6 +140,10 @@ const NotesScreen = () => {
         if (isAfter(today, deadlineDate)) return 'Просрочено';
 
         return format(deadlineDate, 'd MMMM', { locale: ru });
+    };
+
+    const formatDisplayDate = (date: Date) => {
+        return format(date, 'd MMMM yyyy', { locale: ru });
     };
 
     const renderNote = ({ item }: any) => (
@@ -156,22 +214,106 @@ const NotesScreen = () => {
     );
 
     return (
-        <View style={styles.container}>
-            <FlatList
-                data={sortedNotes}
-                keyExtractor={item => item.id}
-                renderItem={renderNote}
-                contentContainerStyle={styles.listContent}
-                showsVerticalScrollIndicator={false}
-            />
+        <PaperProvider>
+            <View style={styles.container}>
+                <FlatList
+                    data={sortedNotes}
+                    keyExtractor={item => item.id}
+                    renderItem={renderNote}
+                    contentContainerStyle={styles.listContent}
+                    showsVerticalScrollIndicator={false}
+                />
 
-            <FAB
-                icon="plus"
-                style={styles.fab}
-                onPress={() => console.log('Add new note')}
-                color="#FFFFFF"
-            />
-        </View>
+                <FAB
+                    icon="plus"
+                    style={styles.fab}
+                    onPress={showModal}
+                    color="#FFFFFF"
+                />
+
+                <Portal>
+                    <Modal
+                        visible={visible}
+                        onDismiss={hideModal}
+                        contentContainerStyle={styles.modalContainer}
+                    >
+                        <Card>
+                            <Card.Content>
+                                <Title style={styles.modalTitle}>Новая заметка</Title>
+                                
+                                <TextInput
+                                    label="Предмет"
+                                    value={newNote.subject}
+                                    onChangeText={(text) => setNewNote({...newNote, subject: text})}
+                                    mode="outlined"
+                                    style={styles.input}
+                                    placeholder="Например: Математика"
+                                />
+                                
+                                <TextInput
+                                    label="Заголовок"
+                                    value={newNote.title}
+                                    onChangeText={(text) => setNewNote({...newNote, title: text})}
+                                    mode="outlined"
+                                    style={styles.input}
+                                    placeholder="Краткое описание"
+                                />
+                                
+                                <TextInput
+                                    label="Описание"
+                                    value={newNote.content}
+                                    onChangeText={(text) => setNewNote({...newNote, content: text})}
+                                    mode="outlined"
+                                    multiline
+                                    numberOfLines={3}
+                                    style={styles.input}
+                                    placeholder="Подробное описание задания"
+                                />
+                                
+                                <View style={styles.dateSection}>
+                                    <Text style={styles.dateLabel}>Дедлайн</Text>
+                                    <Button 
+                                        mode="outlined" 
+                                        onPress={showDatepicker}
+                                        style={styles.dateButton}
+                                        icon="calendar"
+                                    >
+                                        {formatDisplayDate(selectedDate)}
+                                    </Button>
+                                </View>
+
+                                {showDatePicker && (
+                                    <DateTimePicker
+                                        value={selectedDate}
+                                        mode="date"
+                                        display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                                        onChange={onDateChange}
+                                        minimumDate={new Date()}
+                                    />
+                                )}
+                            </Card.Content>
+                            <Card.Actions style={styles.modalActions}>
+                                <Button 
+                                    mode="outlined" 
+                                    onPress={hideModal}
+                                    style={styles.modalButton}
+                                >
+                                    Отмена
+                                </Button>
+                                <Button 
+                                    mode="contained" 
+                                    onPress={addNote}
+                                    style={styles.modalButton}
+                                    disabled={!newNote.title.trim() || !newNote.content.trim() || !newNote.subject.trim()}
+                                >
+                                    Добавить
+                                </Button>
+                            </Card.Actions>
+                        </Card>
+                    </Modal>
+                </Portal>
+            </View>
+        </PaperProvider>
     );
 };
 
@@ -241,6 +383,37 @@ const styles = StyleSheet.create({
         right: 0,
         bottom: 0,
         backgroundColor: '#1E88E5',
+    },
+    modalContainer: {
+        margin: 20,
+    },
+    modalTitle: {
+        textAlign: 'center',
+        marginBottom: 16,
+        color: '#1E88E5',
+    },
+    input: {
+        marginBottom: 12,
+    },
+    dateSection: {
+        marginBottom: 12,
+    },
+    dateLabel: {
+        fontSize: 16,
+        fontWeight: 'bold',
+        marginBottom: 8,
+        color: '#333',
+    },
+    dateButton: {
+        borderColor: '#1E88E5',
+    },
+    modalActions: {
+        justifyContent: 'space-between',
+        paddingHorizontal: 16,
+        paddingBottom: 16,
+    },
+    modalButton: {
+        minWidth: 100,
     },
 });
 

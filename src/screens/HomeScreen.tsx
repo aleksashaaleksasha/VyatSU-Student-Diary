@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { View, StyleSheet, ScrollView, Dimensions } from 'react-native';
 import { Card, Title, Text, FAB } from 'react-native-paper';

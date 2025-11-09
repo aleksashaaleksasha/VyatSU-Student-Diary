@@ -1,13 +1,18 @@
+// App.tsx
 import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { createStackNavigator } from '@react-navigation/stack';
 import { Provider as PaperProvider, DefaultTheme } from 'react-native-paper';
 import { Ionicons } from '@expo/vector-icons';
 import ScheduleScreen from './src/screens/ScheduleScreen';
 import NotesScreen from './src/screens/NotesScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
+import ImportScreen from './src/screens/ImportScreen';
+import GroupSelectScreen from './src/screens/GroupSelectScreen';
 
 const Tab = createBottomTabNavigator();
+const Stack = createStackNavigator();
 
 const theme = {
     ...DefaultTheme,
@@ -18,6 +23,26 @@ const theme = {
         background: '#FFFFFF',
     },
 };
+
+const SettingsStack = () => (
+    <Stack.Navigator>
+        <Stack.Screen
+            name="SettingsMain"
+            component={SettingsScreen}
+            options={{ title: 'Настройки' }}
+        />
+        <Stack.Screen
+            name="Import"
+            component={ImportScreen}
+            options={{ title: 'Импорт расписания' }}
+        />
+        <Stack.Screen
+            name="GroupSelect"
+            component={GroupSelectScreen}
+            options={{ title: 'Выбор группы' }}
+        />
+    </Stack.Navigator>
+);
 
 export default function App() {
     return (
@@ -56,8 +81,8 @@ export default function App() {
                     />
                     <Tab.Screen
                         name="Настройки"
-                        component={SettingsScreen}
-                        options={{ title: 'Настройки' }}
+                        component={SettingsStack}
+                        options={{ title: 'Настройки', headerShown: false }}
                     />
                 </Tab.Navigator>
             </NavigationContainer>

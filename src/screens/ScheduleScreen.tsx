@@ -1,183 +1,491 @@
-import React, { useState } from 'react';
-import { View, StyleSheet, ScrollView, Dimensions } from 'react-native';
-import { Card, Title, Text, FAB, Button, Appbar, Menu, Divider } from 'react-native-paper';
-import { format, addDays, subDays, eachDayOfInterval, startOfWeek, endOfWeek } from 'date-fns';
+import React, { useState, useEffect } from 'react';
+import { View, StyleSheet, FlatList, TouchableOpacity, Alert, Dimensions } from 'react-native';
+import {
+    Card,
+    Title,
+    Text,
+    FAB,
+    Chip,
+    Button,
+    Modal,
+    Portal,
+    TextInput,
+    Provider as PaperProvider,
+    Divider
+} from 'react-native-paper';
+import { format, isAfter, isToday, isSameDay, addDays, subDays } from 'date-fns';
 import { ru } from 'date-fns/locale';
+import * as SQLite from 'expo-sqlite';
 
 const { width } = Dimensions.get('window');
 
+// Открываем базу данных
+const db = SQLite.openDatabaseSync('student_diary.db');
+
+interface ScheduleItem {
+    id: number;
+    subject: string;
+    time: string;
+    teacher: string;
+    classroom: string;
+    date: Date;
+    type: string;
+    student_group?: string;
+}
+
+interface NewSchedule {
+    subject: string;
+    time: string;
+    teacher: string;
+    classroom: string;
+    type: string;
+}
+
 const ScheduleScreen = () => {
-    const [currentDate, setCurrentDate] = useState(new Date());
-    const [menuVisible, setMenuVisible] = useState(false);
+    const [selectedDate, setSelectedDate] = useState(new Date());
+    const [showAddModal, setShowAddModal] = useState(false);
+    const [longPressItem, setLongPressItem] = useState<ScheduleItem | null>(null);
+    const [showActionModal, setShowActionModal] = useState(false);
+    const [touchStartX, setTouchStartX] = useState(0);
 
-    const generateScheduleData = () => {
-        const weekStart = startOfWeek(currentDate, { weekStartsOn: 1 });
-        const weekDays = eachDayOfInterval({
-            start: weekStart,
-            end: endOfWeek(currentDate, { weekStartsOn: 1 })
+    // Новое занятие
+    const [newSchedule, setNewSchedule] = useState<NewSchedule>({
+        subject: '',
+        time: '',
+        teacher: '',
+        classroom: '',
+        type: 'Лекция'
+    });
+
+    const [schedule, setSchedule] = useState<ScheduleItem[]>([]);
+
+    // Инициализация базы данных
+    useEffect(() => {
+        initDatabase();
+        loadScheduleFromDB();
+    }, []);
+
+    const initDatabase = () => {
+        try {
+            // Удаляем старую таблицу если существует
+            try {
+                db.execSync('DROP TABLE IF EXISTS schedule;');
+            } catch (error) {
+                console.log('Error dropping old table:', error);
+            }
+
+            db.execSync(`
+                CREATE TABLE IF NOT EXISTS schedule (
+                                                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                                        subject TEXT NOT NULL,
+                                                        time TEXT NOT NULL,
+                                                        teacher TEXT NOT NULL,
+                                                        classroom TEXT NOT NULL,
+                                                        date TEXT NOT NULL,
+                                                        type TEXT NOT NULL,
+                                                        student_group TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS settings (
+                                                        key TEXT PRIMARY KEY,
+                                                        value TEXT NOT NULL
+                );
+            `);
+            console.log('Tables created successfully');
+        } catch (error) {
+            console.log('Error creating table:', error);
+        }
+    };
+
+    // Загрузка расписания из базы данных
+    const loadScheduleFromDB = () => {
+        try {
+            const results = db.getAllSync('SELECT * FROM schedule;') as any[];
+            const scheduleData = results.map(item => ({
+                ...item,
+                date: new Date(item.date)
+            }));
+            setSchedule(scheduleData);
+        } catch (error) {
+            console.log('Error loading schedule:', error);
+        }
+    };
+
+    // Сохранение занятия в базу данных
+    const saveScheduleToDB = (scheduleItem: Omit<ScheduleItem, 'id'>): number => {
+        try {
+            const result = db.runSync(
+                `INSERT INTO schedule (subject, time, teacher, classroom, date, type, student_group) 
+                 VALUES (?, ?, ?, ?, ?, ?, ?);`,
+                [
+                    scheduleItem.subject,
+                    scheduleItem.time,
+                    scheduleItem.teacher,
+                    scheduleItem.classroom,
+                    scheduleItem.date.toISOString(),
+                    scheduleItem.type,
+                    'Ручное добавление'
+                ]
+            );
+            console.log('Schedule item saved successfully');
+            return result.lastInsertRowId;
+        } catch (error) {
+            console.log('Error saving schedule item:', error);
+            throw error;
+        }
+    };
+
+    // Удаление занятия из базы данных
+    const deleteScheduleFromDB = (id: number) => {
+        try {
+            db.runSync('DELETE FROM schedule WHERE id = ?;', [id]);
+            console.log('Schedule item deleted successfully');
+        } catch (error) {
+            console.log('Error deleting schedule item:', error);
+        }
+    };
+
+    // Фильтрация расписания по выбранной дате
+    const filteredSchedule = schedule.filter(item =>
+        isSameDay(item.date, selectedDate)
+    );
+
+    const handleDateChange = (direction: 'prev' | 'next') => {
+        setSelectedDate(current =>
+            direction === 'next' ? addDays(current, 1) : subDays(current, 1)
+        );
+    };
+
+    // Обработка начала касания
+    const handleTouchStart = (e: any) => {
+        setTouchStartX(e.nativeEvent.pageX);
+    };
+
+    // Обработка окончания касания
+    const handleTouchEnd = (e: any) => {
+        const touchEndX = e.nativeEvent.pageX;
+        const diff = touchEndX - touchStartX;
+
+        if (Math.abs(diff) > 50) { // Минимальная дистанция свайпа
+            if (diff > 0) {
+                handleDateChange('prev'); // Свайп вправо
+            } else {
+                handleDateChange('next'); // Свайп влево
+            }
+        }
+    };
+
+    // Добавление занятия
+    const addSchedule = async () => {
+        if (!newSchedule.subject.trim() || !newSchedule.time.trim() ||
+            !newSchedule.teacher.trim() || !newSchedule.classroom.trim()) {
+            Alert.alert('Ошибка', 'Заполните все поля');
+            return;
+        }
+
+        const scheduleItem = {
+            subject: newSchedule.subject.trim(),
+            time: newSchedule.time.trim(),
+            teacher: newSchedule.teacher.trim(),
+            classroom: newSchedule.classroom.trim(),
+            date: new Date(selectedDate),
+            type: newSchedule.type
+        };
+
+        try {
+            const newId = saveScheduleToDB(scheduleItem);
+            const newScheduleItem: ScheduleItem = {
+                ...scheduleItem,
+                id: newId,
+                student_group: 'Ручное добавление'
+            };
+            setSchedule(prev => [newScheduleItem, ...prev]);
+            setShowAddModal(false);
+            resetNewSchedule();
+        } catch (error) {
+            Alert.alert('Ошибка', 'Не удалось сохранить занятие');
+        }
+    };
+
+    // Удаление занятия
+    const deleteSchedule = (id: number) => {
+        Alert.alert(
+            'Удалить занятие',
+            'Вы уверены, что хотите удалить это занятие?',
+            [
+                { text: 'Отмена', style: 'cancel' },
+                {
+                    text: 'Удалить',
+                    style: 'destructive',
+                    onPress: () => {
+                        deleteScheduleFromDB(id);
+                        setSchedule(prev => prev.filter(item => item.id !== id));
+                        setShowActionModal(false);
+                    },
+                },
+            ]
+        );
+    };
+
+    const resetNewSchedule = () => {
+        setNewSchedule({
+            subject: '',
+            time: '',
+            teacher: '',
+            classroom: '',
+            type: 'Лекция'
         });
-
-        const schedule: any = {};
-
-        weekDays.forEach(day => {
-            const dayKey = format(day, 'yyyy-MM-dd');
-            schedule[dayKey] = [
-                { time: '09:00-10:30', subject: 'Математика', type: 'lecture', room: '301', teacher: 'Иванов А.И.' },
-                { time: '10:40-12:10', subject: 'Программирование', type: 'lab', room: '415', teacher: 'Петров С.В.' },
-                { time: '13:00-14:30', subject: 'Физика', type: 'practice', room: '210', teacher: 'Сидорова М.К.' },
-            ].filter((_, index) => day.getDay() !== 0 && day.getDay() !== 6);
-        });
-
-        return schedule;
     };
 
-    const scheduleData = generateScheduleData();
-    const currentDayKey = format(currentDate, 'yyyy-MM-dd');
-
-    const handleSwipe = (direction: 'left' | 'right') => {
-        if (direction === 'left') {
-            setCurrentDate(addDays(currentDate, 1));
-        } else {
-            setCurrentDate(subDays(currentDate, 1));
-        }
+    const handleLongPress = (item: ScheduleItem) => {
+        setLongPressItem(item);
+        setShowActionModal(true);
     };
 
-    const getTypeColor = (type: string) => {
-        switch (type) {
-            case 'lecture': return '#4CAF50';
-            case 'practice': return '#2196F3';
-            case 'lab': return '#FF9800';
-            default: return '#757575';
-        }
-    };
-
-    const getTypeText = (type: string) => {
-        switch (type) {
-            case 'lecture': return 'Лекция';
-            case 'practice': return 'Практика';
-            case 'lab': return 'Лаб. работа';
-            default: return type;
-        }
-    };
-
-    return (
-        <View style={styles.container}>
-            <Appbar.Header>
-                <Appbar.Content title="Расписание" />
-                <Menu
-                    visible={menuVisible}
-                    onDismiss={() => setMenuVisible(false)}
-                    anchor={
-                        <Appbar.Action
-                            icon="plus"
-                            onPress={() => setMenuVisible(true)}
-                        />
-                    }
-                >
-                    <Menu.Item
-                        onPress={() => {
-                            setMenuVisible(false);
-                            console.log('Import from phone');
-                        }}
-                        title="Импорт из телефона"
-                    />
-                    <Menu.Item
-                        onPress={() => {
-                            setMenuVisible(false);
-                            console.log('Import from VK');
-                        }}
-                        title="Импорт из ВК"
-                    />
-                    <Divider />
-                    <Menu.Item
-                        onPress={() => {
-                            setMenuVisible(false);
-                            console.log('Clear schedule');
-                        }}
-                        title="Очистить расписание"
-                    />
-                </Menu>
-            </Appbar.Header>
-
-            <Card style={styles.headerCard}>
+    const renderScheduleItem = ({ item }: { item: ScheduleItem }) => (
+        <TouchableOpacity
+            onLongPress={() => handleLongPress(item)}
+            delayLongPress={500}
+        >
+            <Card style={styles.scheduleCard}>
                 <Card.Content>
-                    <Title style={styles.dateTitle}>
-                        {format(currentDate, 'EEEE, d MMMM yyyy', { locale: ru })}
-                    </Title>
-                    <Text style={styles.weekDay}>
-                        {format(currentDate, 'cccc', { locale: ru })}
-                    </Text>
+                    <View style={styles.scheduleHeader}>
+                        <Title style={styles.subjectTitle}>{item.subject}</Title>
+                        <Chip mode="outlined" style={styles.typeChip}>
+                            {item.type}
+                        </Chip>
+                    </View>
+
+                    <View style={styles.scheduleDetails}>
+                        <View style={styles.detailRow}>
+                            <Text style={styles.detailLabel}>Время:</Text>
+                            <Text style={styles.detailValue}>{item.time}</Text>
+                        </View>
+                        <View style={styles.detailRow}>
+                            <Text style={styles.detailLabel}>Преподаватель:</Text>
+                            <Text style={styles.detailValue}>{item.teacher}</Text>
+                        </View>
+                        <View style={styles.detailRow}>
+                            <Text style={styles.detailLabel}>Аудитория:</Text>
+                            <Text style={styles.detailValue}>{item.classroom}</Text>
+                        </View>
+                    </View>
                 </Card.Content>
             </Card>
+        </TouchableOpacity>
+    );
 
-            <ScrollView
-                style={styles.scheduleScroll}
-                horizontal
-                pagingEnabled
-                showsHorizontalScrollIndicator={false}
-                onScroll={(event) => {
-                    const offsetX = event.nativeEvent.contentOffset.x;
-                    if (offsetX === width) {
-                        handleSwipe('left');
-                    } else if (offsetX === 0) {
-                        handleSwipe('right');
-                    }
-                }}
-                scrollEventThrottle={16}
-            >
-                <View style={{ width }}>
-                    <Card style={styles.scheduleCard}>
-                        <Card.Content>
-                            {scheduleData[currentDayKey] && scheduleData[currentDayKey].length > 0 ? (
-                                scheduleData[currentDayKey].map((lesson: any, index: number) => (
-                                    <View key={index} style={styles.lessonItem}>
-                                        <View style={styles.lessonHeader}>
-                                            <Text style={styles.timeText}>{lesson.time}</Text>
-                                            <View
-                                                style={[
-                                                    styles.typeBadge,
-                                                    { backgroundColor: getTypeColor(lesson.type) }
-                                                ]}
-                                            >
-                                                <Text style={styles.typeText}>
-                                                    {getTypeText(lesson.type)}
-                                                </Text>
-                                            </View>
-                                        </View>
-                                        <Text style={styles.subjectText}>{lesson.subject}</Text>
-                                        <Text style={styles.detailsText}>
-                                            {lesson.teacher} • ауд. {lesson.room}
-                                        </Text>
-                                    </View>
-                                ))
-                            ) : (
-                                <View style={styles.noClasses}>
-                                    <Text style={styles.noClassesText}>Пар нет 🎉</Text>
-                                    <Button
-                                        mode="contained"
-                                        onPress={() => setMenuVisible(true)}
-                                        style={styles.importButton}
-                                    >
-                                        Добавить расписание
-                                    </Button>
-                                </View>
-                            )}
-                        </Card.Content>
-                    </Card>
+    return (
+        <PaperProvider>
+            <View style={styles.container}>
+                {/* Заголовок с датой */}
+                <Card style={styles.dateHeaderCard}>
+                    <Card.Content>
+                        <View style={styles.dateHeader}>
+                            <Button
+                                icon="chevron-left"
+                                onPress={() => handleDateChange('prev')}
+                                mode="text"
+                                compact={true}
+                            >
+                                {''}
+                            </Button>
+                            <View style={styles.dateInfo}>
+                                <Title style={styles.dateTitle}>
+                                    {format(selectedDate, 'd MMMM yyyy', { locale: ru })}
+                                </Title>
+                                <Text style={styles.weekDay}>
+                                    {format(selectedDate, 'EEEE', { locale: ru })}
+                                </Text>
+                            </View>
+                            <Button
+                                icon="chevron-right"
+                                onPress={() => handleDateChange('next')}
+                                mode="text"
+                                compact={true}
+                            >
+                                {''}
+                            </Button>
+                        </View>
+                    </Card.Content>
+                </Card>
+
+                {/* Область для свайпов */}
+                <View
+                    style={styles.swipeArea}
+                    onTouchStart={handleTouchStart}
+                    onTouchEnd={handleTouchEnd}
+                >
+                    {/* Расписание на выбранный день */}
+                    <View style={styles.scheduleSection}>
+                        <Title style={styles.sectionTitle}>
+                            Расписание
+                        </Title>
+
+                        {filteredSchedule.length === 0 ? (
+                            <View style={styles.emptyState}>
+                                <Text style={styles.emptyText}>
+                                    На этот день занятий нет
+                                </Text>
+                                <Button
+                                    mode="contained"
+                                    onPress={() => setShowAddModal(true)}
+                                    style={styles.addButton}
+                                >
+                                    Добавить занятие
+                                </Button>
+                            </View>
+                        ) : (
+                            <FlatList
+                                data={filteredSchedule}
+                                keyExtractor={item => item.id.toString()}
+                                renderItem={renderScheduleItem}
+                                contentContainerStyle={styles.scheduleList}
+                                showsVerticalScrollIndicator={false}
+                            />
+                        )}
+                    </View>
                 </View>
-            </ScrollView>
 
-            <View style={styles.navigationHint}>
-                <Text style={styles.hintText}>Свайпните для переключения дней</Text>
+                {/* Кнопка добавления */}
+                <FAB
+                    icon="plus"
+                    style={styles.fab}
+                    onPress={() => setShowAddModal(true)}
+                    color="#FFFFFF"
+                />
+
+                {/* Модальное окно добавления занятия */}
+                <Portal>
+                    <Modal
+                        visible={showAddModal}
+                        onDismiss={() => {
+                            setShowAddModal(false);
+                            resetNewSchedule();
+                        }}
+                        contentContainerStyle={styles.modalContainer}
+                    >
+                        <Card>
+                            <Card.Content>
+                                <Title style={styles.modalTitle}>Новое занятие</Title>
+                                <Text style={styles.modalSubtitle}>
+                                    {format(selectedDate, 'd MMMM yyyy', { locale: ru })}
+                                </Text>
+
+                                <TextInput
+                                    label="Предмет *"
+                                    value={newSchedule.subject}
+                                    onChangeText={(text) => setNewSchedule({...newSchedule, subject: text})}
+                                    mode="outlined"
+                                    style={styles.input}
+                                    placeholder="Например: Математика"
+                                />
+
+                                <TextInput
+                                    label="Время *"
+                                    value={newSchedule.time}
+                                    onChangeText={(text) => setNewSchedule({...newSchedule, time: text})}
+                                    mode="outlined"
+                                    style={styles.input}
+                                    placeholder="Например: 09:00 - 10:30"
+                                />
+
+                                <TextInput
+                                    label="Преподаватель *"
+                                    value={newSchedule.teacher}
+                                    onChangeText={(text) => setNewSchedule({...newSchedule, teacher: text})}
+                                    mode="outlined"
+                                    style={styles.input}
+                                    placeholder="Например: Иванова А.П."
+                                />
+
+                                <TextInput
+                                    label="Аудитория *"
+                                    value={newSchedule.classroom}
+                                    onChangeText={(text) => setNewSchedule({...newSchedule, classroom: text})}
+                                    mode="outlined"
+                                    style={styles.input}
+                                    placeholder="Например: А-101"
+                                />
+
+                                <Text style={styles.typeLabel}>Тип занятия</Text>
+                                <View style={styles.typeButtons}>
+                                    {['Лекция', 'Практика', 'Лабораторная'].map((type) => (
+                                        <Button
+                                            key={type}
+                                            mode={newSchedule.type === type ? "contained" : "outlined"}
+                                            onPress={() => setNewSchedule({...newSchedule, type})}
+                                            style={styles.typeButton}
+                                        >
+                                            {type}
+                                        </Button>
+                                    ))}
+                                </View>
+                            </Card.Content>
+                            <Card.Actions style={styles.modalActions}>
+                                <Button
+                                    mode="outlined"
+                                    onPress={() => {
+                                        setShowAddModal(false);
+                                        resetNewSchedule();
+                                    }}
+                                    style={styles.modalButton}
+                                >
+                                    Отмена
+                                </Button>
+                                <Button
+                                    mode="contained"
+                                    onPress={addSchedule}
+                                    style={styles.modalButton}
+                                    disabled={!newSchedule.subject.trim() || !newSchedule.time.trim() ||
+                                        !newSchedule.teacher.trim() || !newSchedule.classroom.trim()}
+                                >
+                                    Добавить
+                                </Button>
+                            </Card.Actions>
+                        </Card>
+                    </Modal>
+                </Portal>
+
+                {/* Модальное окно действий (долгое нажатие) */}
+                <Portal>
+                    <Modal
+                        visible={showActionModal}
+                        onDismiss={() => setShowActionModal(false)}
+                        contentContainerStyle={styles.actionModalContainer}
+                    >
+                        <Card>
+                            <Card.Content>
+                                <Title style={styles.actionModalTitle}>Действия с занятием</Title>
+                                <Text style={styles.actionModalSubject}>
+                                    {longPressItem?.subject}
+                                </Text>
+                            </Card.Content>
+                            <Card.Actions style={styles.actionModalActions}>
+                                <Button
+                                    mode="outlined"
+                                    onPress={() => {
+                                        setShowActionModal(false);
+                                        Alert.alert('Информация', 'Редактирование будет реализовано в будущем');
+                                    }}
+                                    style={styles.actionModalButton}
+                                >
+                                    Редактировать
+                                </Button>
+                                <Button
+                                    mode="contained"
+                                    onPress={() => longPressItem && deleteSchedule(longPressItem.id)}
+                                    style={styles.actionModalButton}
+                                    buttonColor="#FF3B30"
+                                >
+                                    Удалить
+                                </Button>
+                            </Card.Actions>
+                        </Card>
+                    </Modal>
+                </Portal>
             </View>
-
-            <FAB
-                icon="calendar"
-                style={styles.fab}
-                onPress={() => setCurrentDate(new Date())}
-                label="Сегодня"
-            />
-        </View>
+        </PaperProvider>
     );
 };
 
@@ -186,83 +494,98 @@ const styles = StyleSheet.create({
         flex: 1,
         backgroundColor: '#f8f9fa',
     },
-    headerCard: {
+    dateHeaderCard: {
         margin: 16,
         marginBottom: 8,
         backgroundColor: '#1E88E5',
+    },
+    dateHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+    },
+    dateInfo: {
+        alignItems: 'center',
+        flex: 1,
     },
     dateTitle: {
         color: '#FFFFFF',
         fontSize: 18,
         fontWeight: 'bold',
+        textAlign: 'center',
     },
     weekDay: {
         color: '#E3F2FD',
         fontSize: 14,
+        textAlign: 'center',
     },
-    scheduleScroll: {
+    swipeArea: {
         flex: 1,
     },
-    scheduleCard: {
-        margin: 16,
-        marginTop: 8,
-    },
-    lessonItem: {
+    scheduleSection: {
+        flex: 1,
         padding: 16,
-        borderBottomWidth: 1,
-        borderBottomColor: '#e0e0e0',
+        paddingTop: 0,
     },
-    lessonHeader: {
+    sectionTitle: {
+        fontSize: 18,
+        marginBottom: 16,
+        color: '#333',
+        textAlign: 'center',
+    },
+    scheduleList: {
+        paddingBottom: 80,
+    },
+    scheduleCard: {
+        marginBottom: 12,
+        backgroundColor: '#FFFFFF',
+    },
+    scheduleHeader: {
         flexDirection: 'row',
         justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: 8,
+        alignItems: 'flex-start',
+        marginBottom: 12,
     },
-    timeText: {
+    subjectTitle: {
         fontSize: 16,
-        fontWeight: '600',
+        fontWeight: 'bold',
+        flex: 1,
+        marginRight: 8,
+    },
+    typeChip: {
+        backgroundColor: '#E3F2FD',
+        borderColor: '#1E88E5',
+    },
+    scheduleDetails: {
+        gap: 6,
+    },
+    detailRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+    },
+    detailLabel: {
+        fontSize: 14,
+        color: '#666',
+        fontWeight: '500',
+    },
+    detailValue: {
+        fontSize: 14,
         color: '#333',
     },
-    typeBadge: {
-        paddingHorizontal: 8,
-        paddingVertical: 4,
-        borderRadius: 12,
-    },
-    typeText: {
-        color: '#FFFFFF',
-        fontSize: 12,
-        fontWeight: '500',
-    },
-    subjectText: {
-        fontSize: 18,
-        fontWeight: 'bold',
-        color: '#1a1a1a',
-        marginBottom: 4,
-    },
-    detailsText: {
-        fontSize: 14,
-        color: '#666',
-    },
-    noClasses: {
+    emptyState: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
         padding: 40,
-        alignItems: 'center',
+        gap: 16,
     },
-    noClassesText: {
-        fontSize: 18,
+    emptyText: {
+        fontSize: 16,
         color: '#666',
-        fontWeight: '500',
-        marginBottom: 16,
+        textAlign: 'center',
     },
-    importButton: {
+    addButton: {
         marginTop: 8,
-    },
-    navigationHint: {
-        padding: 16,
-        alignItems: 'center',
-    },
-    hintText: {
-        color: '#1E88E5',
-        fontSize: 14,
     },
     fab: {
         position: 'absolute',
@@ -270,6 +593,70 @@ const styles = StyleSheet.create({
         right: 0,
         bottom: 0,
         backgroundColor: '#1E88E5',
+    },
+    modalContainer: {
+        margin: 20,
+    },
+    modalTitle: {
+        textAlign: 'center',
+        marginBottom: 4,
+        color: '#1E88E5',
+    },
+    modalSubtitle: {
+        textAlign: 'center',
+        marginBottom: 16,
+        color: '#666',
+        fontSize: 14,
+    },
+    input: {
+        marginBottom: 12,
+    },
+    typeLabel: {
+        fontSize: 16,
+        fontWeight: 'bold',
+        marginBottom: 8,
+        color: '#333',
+    },
+    typeButtons: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        marginBottom: 16,
+    },
+    typeButton: {
+        flex: 1,
+        marginHorizontal: 4,
+    },
+    modalActions: {
+        justifyContent: 'space-between',
+        paddingHorizontal: 16,
+        paddingBottom: 16,
+    },
+    modalButton: {
+        minWidth: 100,
+    },
+    actionModalContainer: {
+        margin: 40,
+    },
+    actionModalTitle: {
+        textAlign: 'center',
+        marginBottom: 8,
+        color: '#1E88E5',
+    },
+    actionModalSubject: {
+        textAlign: 'center',
+        fontSize: 16,
+        fontWeight: 'bold',
+        color: '#333',
+        marginBottom: 16,
+    },
+    actionModalActions: {
+        justifyContent: 'space-between',
+        paddingHorizontal: 16,
+        paddingBottom: 16,
+    },
+    actionModalButton: {
+        flex: 1,
+        marginHorizontal: 4,
     },
 });
 
