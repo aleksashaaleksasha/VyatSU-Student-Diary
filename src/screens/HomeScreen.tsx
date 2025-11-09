@@ -3,7 +3,7 @@ import { View, StyleSheet, ScrollView, Dimensions } from 'react-native';
 import { Card, Title, Text, FAB } from 'react-native-paper';
 import { format, addDays, subDays, eachDayOfInterval, startOfWeek, endOfWeek } from 'date-fns';
 import { ru } from 'date-fns/locale';
-
+//1
 const { width } = Dimensions.get('window');
 
 const ScheduleScreen = () => {

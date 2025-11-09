@@ -1,4 +1,4 @@
-// src/screens/GroupSelectScreen.tsx
+
 import React, { useState, useEffect } from 'react';
 import { View, StyleSheet, ScrollView } from 'react-native';
 import { Card, Title, TextInput, Button, List, Chip } from 'react-native-paper';

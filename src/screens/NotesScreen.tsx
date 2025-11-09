@@ -4,7 +4,7 @@ import { Card, Title, Text, FAB, Chip, Button, Modal, Portal, TextInput, Provide
 import { format, isAfter, isToday, isTomorrow } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import DateTimePicker from '@react-native-community/datetimepicker';
-
+//1
 const NotesScreen = () => {
     const [notes, setNotes] = useState([
         {

@@ -1,4 +1,4 @@
-// src/screens/SettingsScreen.tsx
+
 import React, { useState, useEffect } from 'react';
 import { View, StyleSheet, ScrollView } from 'react-native';
 import { Card, Title, Paragraph, Switch, List, Button, Divider, Chip } from 'react-native-paper';

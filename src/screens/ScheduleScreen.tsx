@@ -19,7 +19,7 @@ import * as SQLite from 'expo-sqlite';
 
 const { width } = Dimensions.get('window');
 
-// Открываем базу данных
+
 const db = SQLite.openDatabaseSync('student_diary.db');
 
 interface ScheduleItem {

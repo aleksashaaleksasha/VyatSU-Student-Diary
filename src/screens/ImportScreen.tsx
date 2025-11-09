@@ -1,4 +1,4 @@
-// src/screens/ImportScreen.tsx
+
 import React, { useState, useEffect } from 'react';
 import { View, StyleSheet, ScrollView, Alert } from 'react-native';
 import { Card, Title, Paragraph, Button, List, ActivityIndicator, Chip } from 'react-native-paper';
