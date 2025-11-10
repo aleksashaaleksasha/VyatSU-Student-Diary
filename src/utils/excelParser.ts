@@ -556,7 +556,92 @@ export class ExcelScheduleParser {
         return this.extractGroupsWithInfo(data);
     }
 
-    // ОСНОВНОЙ ПУБЛИЧНЫЙ МЕТОД
+    // НОВЫЙ МЕТОД: Импорт из ArrayBuffer (для VK API)
+    public static async importFromArrayBuffer(arrayBuffer: ArrayBuffer, userGroup: string): Promise<ExcelImportResult> {
+        try {
+            const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+            const firstSheetName = workbook.SheetNames[0];
+            const worksheet = workbook.Sheets[firstSheetName];
+
+            const mergedCells = worksheet['!merges'] || [];
+            console.log(`Found ${mergedCells.length} merged cell ranges in the worksheet`);
+
+            const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[][];
+
+            console.log('=== EXCEL FILE FROM ARRAYBUFFER LOADED ===');
+            console.log('Total rows:', jsonData.length);
+            console.log(`Schedule starts from column: ${this.SCHEDULE_START_COLUMN} (column G)`);
+            console.log(`Merged cells: ${mergedCells.length}`);
+
+            // Получаем все группы с полной информацией
+            const allGroups = this.getAllGroups(jsonData);
+            console.log('All groups found:', allGroups.map(g => ({
+                group: g.group,
+                speciality: g.speciality,
+                academicYear: g.academicYear,
+                semester: g.semester
+            })));
+
+            // Если группа не указана, возвращаем список групп
+            if (!userGroup) {
+                return {
+                    success: true,
+                    data: [],
+                    groups: allGroups
+                };
+            }
+
+            // Проверяем, есть ли выбранная группа в файле
+            const targetGroup = allGroups.find(g => g.group === userGroup);
+            if (!targetGroup) {
+                return {
+                    success: false,
+                    data: [],
+                    error: `Группа "${userGroup}" не найдена в файле. Доступные группы: ${allGroups.map(g => g.group).join(', ')}`,
+                    groups: allGroups
+                };
+            }
+
+            console.log(`\n=== STARTING IMPORT FOR GROUP: ${userGroup} ===`);
+
+            let parsedData: ParsedScheduleItem[];
+
+            if (mergedCells.length > 0) {
+                // ИСПОЛЬЗУЕМ ТОЧНУЮ ИНФОРМАЦИЮ ОБ ОБЪЕДИНЕННЫХ ЯЧЕЙКАХ
+                console.log('🔧 Using merged cells information for parsing');
+                parsedData = this.parseSubjectDataWithMergedCells(jsonData, userGroup, mergedCells);
+            } else {
+                // ИСПОЛЬЗУЕМ ЭВРИСТИЧЕСКИЙ МЕТОД ВОССТАНОВЛЕНИЯ
+                console.log('🔧 Using heuristic method for merged cells');
+                parsedData = this.parseSubjectData(jsonData, userGroup);
+            }
+
+            if (parsedData.length === 0) {
+                return {
+                    success: false,
+                    data: [],
+                    error: `Группа "${userGroup}" найдена, но занятия не обнаружены. Проверьте структуру файла.`,
+                    groups: allGroups
+                };
+            }
+
+            return {
+                success: true,
+                data: parsedData,
+                groups: allGroups
+            };
+
+        } catch (error) {
+            console.error('Error importing from ArrayBuffer:', error);
+            return {
+                success: false,
+                data: [],
+                error: `Ошибка импорта: ${error}`
+            };
+        }
+    }
+
+    // ОСНОВНОЙ ПУБЛИЧНЫЙ МЕТОД (оригинальный)
     public static async importFromExcel(userGroup?: string): Promise<ExcelImportResult> {
         try {
             const result = await DocumentPicker.getDocumentAsync({
@@ -574,78 +659,9 @@ export class ExcelScheduleParser {
                 }
 
                 const arrayBuffer = await response.arrayBuffer();
-                const workbook = XLSX.read(arrayBuffer, { type: 'array' });
-                const firstSheetName = workbook.SheetNames[0];
-                const worksheet = workbook.Sheets[firstSheetName];
 
-                // ПОЛУЧАЕМ ИНФОРМАЦИЮ ОБ ОБЪЕДИНЕННЫХ ЯЧЕЙКАХ
-                const mergedCells = worksheet['!merges'] || [];
-                console.log(`Found ${mergedCells.length} merged cell ranges in the worksheet`);
-
-                const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[][];
-
-                console.log('=== EXCEL FILE LOADED ===');
-                console.log('Total rows:', jsonData.length);
-                console.log(`Schedule starts from column: ${this.SCHEDULE_START_COLUMN} (column G)`);
-                console.log(`Merged cells: ${mergedCells.length}`);
-
-                // Получаем все группы с полной информацией
-                const allGroups = this.getAllGroups(jsonData);
-                console.log('All groups found:', allGroups.map(g => ({
-                    group: g.group,
-                    speciality: g.speciality,
-                    academicYear: g.academicYear,
-                    semester: g.semester
-                })));
-
-                // Если группа не указана, возвращаем список групп
-                if (!userGroup) {
-                    return {
-                        success: true,
-                        data: [],
-                        groups: allGroups
-                    };
-                }
-
-                // Проверяем, есть ли выбранная группа в файле
-                const targetGroup = allGroups.find(g => g.group === userGroup);
-                if (!targetGroup) {
-                    return {
-                        success: false,
-                        data: [],
-                        error: `Группа "${userGroup}" не найдена в файле. Доступные группы: ${allGroups.map(g => g.group).join(', ')}`,
-                        groups: allGroups
-                    };
-                }
-
-                console.log(`\n=== STARTING IMPORT FOR GROUP: ${userGroup} ===`);
-
-                let parsedData: ParsedScheduleItem[];
-
-                if (mergedCells.length > 0) {
-                    // ИСПОЛЬЗУЕМ ТОЧНУЮ ИНФОРМАЦИЮ ОБ ОБЪЕДИНЕННЫХ ЯЧЕЙКАХ
-                    console.log('🔧 Using merged cells information for parsing');
-                    parsedData = this.parseSubjectDataWithMergedCells(jsonData, userGroup, mergedCells);
-                } else {
-                    // ИСПОЛЬЗУЕМ ЭВРИСТИЧЕСКИЙ МЕТОД ВОССТАНОВЛЕНИЯ
-                    console.log('🔧 Using heuristic method for merged cells');
-                    parsedData = this.parseSubjectData(jsonData, userGroup);
-                }
-
-                if (parsedData.length === 0) {
-                    return {
-                        success: false,
-                        data: [],
-                        error: `Группа "${userGroup}" найдена, но занятия не обнаружены. Проверьте структуру файла.`,
-                        groups: allGroups
-                    };
-                }
-
-                return {
-                    success: true,
-                    data: parsedData,
-                    groups: allGroups
-                };
+                // Используем новый метод с ArrayBuffer
+                return await this.importFromArrayBuffer(arrayBuffer, userGroup || '');
             }
 
             return {

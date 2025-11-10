@@ -10,6 +10,7 @@ import NotesScreen from './src/screens/NotesScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
 import ImportScreen from './src/screens/ImportScreen';
 import GroupSelectScreen from './src/screens/GroupSelectScreen';
+import VkScheduleScreen from './src/screens/VkScheduleScreen';
 
 const Tab = createBottomTabNavigator();
 const Stack = createStackNavigator();
@@ -40,6 +41,11 @@ const SettingsStack = () => (
             name="GroupSelect"
             component={GroupSelectScreen}
             options={{ title: 'Выбор группы' }}
+        />
+        <Stack.Screen
+            name="VkSchedule"
+            component={VkScheduleScreen}
+            options={{ title: 'Обновление из VK' }}
         />
     </Stack.Navigator>
 );

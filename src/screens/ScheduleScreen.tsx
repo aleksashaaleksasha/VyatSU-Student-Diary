@@ -1,7 +1,6 @@
-// ScheduleScreen.tsx - исправленная версия без добавления пар и без реакции на долгое нажатие
-
+// ScheduleScreen.tsx - с функцией быстрого создания заметки
 import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, FlatList, TouchableOpacity, Alert, Dimensions } from 'react-native';
+import { View, StyleSheet, FlatList, TouchableOpacity, Alert, Dimensions, Platform } from 'react-native';
 import {
     Card,
     Title,
@@ -13,12 +12,13 @@ import {
     Portal,
     TextInput,
     Provider as PaperProvider,
-    Divider
+    Divider,
+    Menu
 } from 'react-native-paper';
 import { format, isAfter, isToday, isSameDay, addDays, subDays } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import * as SQLite from 'expo-sqlite';
-import { useIsFocused } from '@react-navigation/native';
+import { useIsFocused, useNavigation } from '@react-navigation/native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 
 const { width } = Dimensions.get('window');
@@ -40,8 +40,20 @@ const ScheduleScreen = () => {
     const [selectedDate, setSelectedDate] = useState(new Date());
     const [showDatePicker, setShowDatePicker] = useState(false);
     const [schedule, setSchedule] = useState<ScheduleItem[]>([]);
-    const isFocused = useIsFocused();
     const [touchStartX, setTouchStartX] = useState(0);
+    const [contextMenuVisible, setContextMenuVisible] = useState(false);
+    const [selectedScheduleItem, setSelectedScheduleItem] = useState<ScheduleItem | null>(null);
+    const [quickNoteModalVisible, setQuickNoteModalVisible] = useState(false);
+    const [quickNote, setQuickNote] = useState({
+        title: '',
+        content: '',
+        deadlineType: 'next_class' as 'date' | 'next_class' | 'none'
+    });
+    const [selectedNoteDate, setSelectedNoteDate] = useState(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000));
+    const [showNoteDatePicker, setShowNoteDatePicker] = useState(false);
+
+    const isFocused = useIsFocused();
+    const navigation = useNavigation();
 
     // Инициализация базы данных и загрузка расписания
     useEffect(() => {
@@ -74,6 +86,27 @@ const ScheduleScreen = () => {
                 CREATE TABLE IF NOT EXISTS settings (
                     key TEXT PRIMARY KEY,
                     value TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS update_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT NOT NULL,
+                    new_items_count INTEGER NOT NULL,
+                    success INTEGER NOT NULL,
+                    error_message TEXT
+                );
+
+                CREATE TABLE IF NOT EXISTS notes (
+                    id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    subject TEXT NOT NULL,
+                    deadline TEXT,
+                    deadlineType TEXT NOT NULL,
+                    createdAt TEXT NOT NULL,
+                    important INTEGER NOT NULL,
+                    completed INTEGER NOT NULL,
+                    nextClassDate TEXT
                 );
             `);
             console.log('Tables checked/created successfully');
@@ -144,9 +177,140 @@ const ScheduleScreen = () => {
         }
     };
 
+    // Обработка долгого нажатия на пару
+    const handleLongPress = (item: ScheduleItem) => {
+        setSelectedScheduleItem(item);
+        setContextMenuVisible(true);
+    };
+
+    // Создание быстрой заметки по предмету
+    const createQuickNote = () => {
+        if (!selectedScheduleItem) return;
+
+        setQuickNote({
+            title: `${selectedScheduleItem.subject} - задание`,
+            content: '',
+            deadlineType: 'next_class'
+        });
+        setContextMenuVisible(false);
+        setQuickNoteModalVisible(true);
+    };
+
+    // Сохранение быстрой заметки
+    const saveQuickNote = () => {
+        if (!selectedScheduleItem || !quickNote.title.trim()) {
+            Alert.alert('Ошибка', 'Заполните заголовок заметки');
+            return;
+        }
+
+        let deadline: string | undefined;
+        let nextClassDate: string | undefined;
+
+        // Определяем дедлайн в зависимости от типа
+        if (quickNote.deadlineType === 'date') {
+            deadline = selectedNoteDate.toISOString();
+        } else if (quickNote.deadlineType === 'next_class') {
+            // Ищем следующее занятие по этому предмету
+            const nextClass = getNextClassDate(selectedScheduleItem.subject);
+            if (nextClass) {
+                deadline = nextClass.toISOString();
+                nextClassDate = nextClass.toISOString();
+            }
+        }
+
+        const note = {
+            id: Date.now().toString(),
+            title: quickNote.title.trim(),
+            content: quickNote.content.trim(),
+            subject: selectedScheduleItem.subject,
+            deadline,
+            deadlineType: quickNote.deadlineType,
+            createdAt: new Date().toISOString(),
+            important: false,
+            completed: false,
+            nextClassDate
+        };
+
+        try {
+            // Сохраняем в базу данных
+            db.runSync(
+                `INSERT INTO notes (id, title, content, subject, deadline, deadlineType, createdAt, important, completed, nextClassDate) 
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+                [
+                    note.id,
+                    note.title,
+                    note.content,
+                    note.subject,
+                    note.deadline || null,
+                    note.deadlineType,
+                    note.createdAt,
+                    note.important ? 1 : 0,
+                    note.completed ? 1 : 0,
+                    note.nextClassDate || null
+                ]
+            );
+
+            Alert.alert('Успех', 'Заметка создана!');
+            setQuickNoteModalVisible(false);
+
+            // Переходим в заметки
+            navigation.navigate('Заметки' as never);
+
+        } catch (error) {
+            console.log('Error saving quick note:', error);
+            Alert.alert('Ошибка', 'Не удалось сохранить заметку');
+        }
+    };
+
+    // Получение даты следующего занятия по предмету
+    const getNextClassDate = (subject: string): Date | null => {
+        try {
+            const result = db.getFirstSync(
+                'SELECT date FROM schedule WHERE subject = ? AND date >= date("now") AND type != "Лекция" ORDER BY date LIMIT 1;',
+                [subject]
+            ) as any;
+
+            if (result) {
+                return new Date(result.date);
+            }
+            return null;
+        } catch (error) {
+            console.log('Error getting next class date:', error);
+            return null;
+        }
+    };
+
+    const onNoteDateChange = (event: any, date?: Date) => {
+        if (Platform.OS === 'android') {
+            setShowNoteDatePicker(false);
+        }
+        if (date) {
+            setSelectedNoteDate(date);
+        }
+    };
+
+    const showNoteDatepicker = () => {
+        setShowNoteDatePicker(true);
+    };
+
+    const getDeadlineTypeText = (type: string) => {
+        switch (type) {
+            case 'date': return 'Конкретная дата';
+            case 'next_class': return 'До следующего занятия';
+            case 'none': return 'Без дедлайна';
+            default: return type;
+        }
+    };
+
+    const formatDisplayDate = (date: Date) => {
+        return format(date, 'd MMMM yyyy', { locale: ru });
+    };
+
     const renderScheduleItem = ({ item }: { item: ScheduleItem }) => (
-        // УБИРАЕМ onLongPress - теперь при долгом нажатии ничего не происходит
-        <View>
+        <TouchableOpacity
+            onLongPress={() => handleLongPress(item)}
+            delayLongPress={500}
+        >
             <Card style={styles.scheduleCard}>
                 <Card.Content>
                     <View style={styles.scheduleHeader}>
@@ -178,7 +342,7 @@ const ScheduleScreen = () => {
                     </View>
                 </Card.Content>
             </Card>
-        </View>
+        </TouchableOpacity>
     );
 
     return (
@@ -264,7 +428,151 @@ const ScheduleScreen = () => {
                     </View>
                 </View>
 
-                {/* УБИРАЕМ FAB для добавления пар */}
+                {/* Контекстное меню для пар */}
+                <Portal>
+                    <Menu
+                        visible={contextMenuVisible}
+                        onDismiss={() => setContextMenuVisible(false)}
+                        anchor={{ x: 0, y: 0 }} // Позиция будет установлена автоматически
+                    >
+                        <Menu.Item
+                            leadingIcon="note-plus"
+                            title="Создать заметку"
+                            onPress={createQuickNote}
+                        />
+                        <Menu.Item
+                            leadingIcon="information"
+                            title="Информация о предмете"
+                            onPress={() => {
+                                if (selectedScheduleItem) {
+                                    Alert.alert(
+                                        selectedScheduleItem.subject,
+                                        `Преподаватель: ${selectedScheduleItem.teacher}\nАудитория: ${selectedScheduleItem.classroom}\nТип: ${selectedScheduleItem.type}\nВремя: ${selectedScheduleItem.time}`
+                                    );
+                                }
+                                setContextMenuVisible(false);
+                            }}
+                        />
+                    </Menu>
+                </Portal>
+
+                {/* Модальное окно быстрой заметки */}
+                <Portal>
+                    <Modal
+                        visible={quickNoteModalVisible}
+                        onDismiss={() => setQuickNoteModalVisible(false)}
+                        contentContainerStyle={styles.modalContainer}
+                    >
+                        <Card>
+                            <Card.Content>
+                                <Title style={styles.modalTitle}>Быстрая заметка</Title>
+                                <Text style={styles.modalSubtitle}>
+                                    Предмет: {selectedScheduleItem?.subject}
+                                </Text>
+
+                                <TextInput
+                                    label="Заголовок *"
+                                    value={quickNote.title}
+                                    onChangeText={(text) => setQuickNote({...quickNote, title: text})}
+                                    mode="outlined"
+                                    style={styles.input}
+                                    placeholder="Название задания"
+                                />
+
+                                <TextInput
+                                    label="Описание"
+                                    value={quickNote.content}
+                                    onChangeText={(text) => setQuickNote({...quickNote, content: text})}
+                                    mode="outlined"
+                                    multiline
+                                    numberOfLines={3}
+                                    style={styles.input}
+                                    placeholder="Подробное описание задания"
+                                />
+
+                                <View style={styles.deadlineSection}>
+                                    <Text style={styles.label}>Дедлайн</Text>
+                                    <View style={styles.deadlineButtons}>
+                                        <Button
+                                            mode={quickNote.deadlineType === 'next_class' ? "contained" : "outlined"}
+                                            onPress={() => setQuickNote({...quickNote, deadlineType: 'next_class'})}
+                                            style={styles.deadlineButton}
+                                        >
+                                            До след. занятия
+                                        </Button>
+                                        <Button
+                                            mode={quickNote.deadlineType === 'date' ? "contained" : "outlined"}
+                                            onPress={() => setQuickNote({...quickNote, deadlineType: 'date'})}
+                                            style={styles.deadlineButton}
+                                        >
+                                            Конкретная дата
+                                        </Button>
+                                        <Button
+                                            mode={quickNote.deadlineType === 'none' ? "contained" : "outlined"}
+                                            onPress={() => setQuickNote({...quickNote, deadlineType: 'none'})}
+                                            style={styles.deadlineButton}
+                                        >
+                                            Без дедлайна
+                                        </Button>
+                                    </View>
+                                </View>
+
+                                {quickNote.deadlineType === 'date' && (
+                                    <View style={styles.dateSection}>
+                                        <Text style={styles.dateLabel}>Дата выполнения</Text>
+                                        <Button
+                                            mode="outlined"
+                                            onPress={showNoteDatepicker}
+                                            style={styles.dateButton}
+                                            icon="calendar"
+                                        >
+                                            {formatDisplayDate(selectedNoteDate)}
+                                        </Button>
+                                    </View>
+                                )}
+
+                                {quickNote.deadlineType === 'next_class' && selectedScheduleItem && (
+                                    <View style={styles.infoSection}>
+                                        <Text style={styles.infoText}>
+                                            Следующее занятие: {
+                                            getNextClassDate(selectedScheduleItem.subject)
+                                                ? formatDisplayDate(getNextClassDate(selectedScheduleItem.subject)!)
+                                                : 'не найдено'
+                                        }
+                                        </Text>
+                                    </View>
+                                )}
+
+                                {showNoteDatePicker && (
+                                    <DateTimePicker
+                                        value={selectedNoteDate}
+                                        mode="date"
+                                        display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                                        onChange={onNoteDateChange}
+                                        minimumDate={new Date()}
+                                    />
+                                )}
+                            </Card.Content>
+                            <Card.Actions style={styles.modalActions}>
+                                <Button
+                                    mode="outlined"
+                                    onPress={() => setQuickNoteModalVisible(false)}
+                                    style={styles.modalButton}
+                                >
+                                    Отмена
+                                </Button>
+                                <Button
+                                    mode="contained"
+                                    onPress={saveQuickNote}
+                                    style={styles.modalButton}
+                                    disabled={!quickNote.title.trim()}
+                                >
+                                    Сохранить
+                                </Button>
+                            </Card.Actions>
+                        </Card>
+                    </Modal>
+                </Portal>
             </View>
         </PaperProvider>
     );
@@ -377,6 +685,72 @@ const styles = StyleSheet.create({
         textAlign: 'center',
         fontStyle: 'italic',
         marginTop: 8,
+    },
+    modalContainer: {
+        margin: 20,
+    },
+    modalTitle: {
+        textAlign: 'center',
+        marginBottom: 4,
+        color: '#1E88E5',
+    },
+    modalSubtitle: {
+        textAlign: 'center',
+        marginBottom: 16,
+        color: '#666',
+        fontSize: 14,
+    },
+    input: {
+        marginBottom: 12,
+    },
+    deadlineSection: {
+        marginBottom: 12,
+    },
+    label: {
+        fontSize: 16,
+        fontWeight: 'bold',
+        marginBottom: 8,
+        color: '#333',
+    },
+    deadlineButtons: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 8,
+    },
+    deadlineButton: {
+        flex: 1,
+        minWidth: 100,
+    },
+    dateSection: {
+        marginBottom: 12,
+    },
+    dateLabel: {
+        fontSize: 16,
+        fontWeight: 'bold',
+        marginBottom: 8,
+        color: '#333',
+    },
+    dateButton: {
+        borderColor: '#1E88E5',
+    },
+    infoSection: {
+        backgroundColor: '#E3F2FD',
+        padding: 12,
+        borderRadius: 8,
+        marginBottom: 12,
+    },
+    infoText: {
+        color: '#1E88E5',
+        fontSize: 14,
+        fontStyle: 'italic',
+    },
+    modalActions: {
+        justifyContent: 'space-between',
+        paddingHorizontal: 16,
+        paddingBottom: 16,
+    },
+    modalButton: {
+        minWidth: 100,
     },
 });
 

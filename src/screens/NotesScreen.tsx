@@ -1,62 +1,111 @@
-import React, { useState } from 'react';
+// NotesScreen.tsx - улучшенная версия
+import React, { useState, useEffect } from 'react';
 import { View, StyleSheet, FlatList, Platform } from 'react-native';
-import { Card, Title, Text, FAB, Chip, Button, Modal, Portal, TextInput, Provider as PaperProvider } from 'react-native-paper';
-import { format, isAfter, isToday, isTomorrow } from 'date-fns';
+import {
+    Card,
+    Title,
+    Text,
+    FAB,
+    Chip,
+    Button,
+    Modal,
+    Portal,
+    TextInput,
+    Provider as PaperProvider,
+    Menu,
+    Divider
+} from 'react-native-paper';
+import { format, isAfter, isToday, isTomorrow, addDays, isSameDay } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import DateTimePicker from '@react-native-community/datetimepicker';
-//1
-const NotesScreen = () => {
-    const [notes, setNotes] = useState([
-        {
-            id: '1',
-            title: 'Домашнее задание по математике',
-            content: 'Решить задачи 1-10 из учебника, страницы 45-48',
-            subject: 'Математика',
-            deadline: '2024-12-20',
-            createdAt: '2024-12-15',
-            important: true,
-            completed: false,
-        },
-        {
-            id: '2',
-            title: 'Подготовка к экзамену',
-            content: 'Повторить главы 5-8, сделать конспект',
-            subject: 'Программирование',
-            deadline: '2024-12-25',
-            createdAt: '2024-12-10',
-            important: true,
-            completed: false,
-        },
-        {
-            id: '3',
-            title: 'Лабораторная работа',
-            content: 'Написать программу для сортировки данных',
-            subject: 'Алгоритмы',
-            deadline: '2024-12-18',
-            createdAt: '2024-12-12',
-            important: false,
-            completed: false,
-        },
-        {
-            id: '4',
-            title: 'Курсовая работа',
-            content: 'Начать работу над введением',
-            subject: 'Базы данных',
-            deadline: '2024-12-30',
-            createdAt: '2024-12-01',
-            important: false,
-            completed: true,
-        },
-    ]);
+import * as SQLite from 'expo-sqlite';
 
+const db = SQLite.openDatabaseSync('student_diary.db');
+
+interface Note {
+    id: string;
+    title: string;
+    content: string;
+    subject: string;
+    deadline?: string;
+    deadlineType: 'date' | 'next_class' | 'none';
+    createdAt: string;
+    important: boolean;
+    completed: boolean;
+    nextClassDate?: string;
+}
+
+interface ScheduleItem {
+    id: number;
+    subject: string;
+    date: Date;
+    type: string;
+}
+
+const NotesScreen = () => {
+    const [notes, setNotes] = useState<Note[]>([]);
+    const [scheduleSubjects, setScheduleSubjects] = useState<string[]>([]);
     const [visible, setVisible] = useState(false);
     const [showDatePicker, setShowDatePicker] = useState(false);
-    const [selectedDate, setSelectedDate] = useState(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)); // +7 дней по умолчанию
+    const [selectedDate, setSelectedDate] = useState(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000));
+    const [subjectMenuVisible, setSubjectMenuVisible] = useState(false);
+    const [deadlineTypeMenuVisible, setDeadlineTypeMenuVisible] = useState(false);
+
     const [newNote, setNewNote] = useState({
         title: '',
         content: '',
         subject: '',
+        deadlineType: 'none' as 'date' | 'next_class' | 'none'
     });
+
+    // Загрузка данных при монтировании
+    useEffect(() => {
+        loadNotes();
+        loadScheduleSubjects();
+    }, []);
+
+    // Загрузка заметок из базы данных
+    const loadNotes = () => {
+        try {
+            const results = db.getAllSync('SELECT * FROM notes ORDER BY createdAt DESC;') as any[];
+            const loadedNotes = results.map(item => ({
+                ...item,
+                completed: item.completed === 1
+            }));
+            setNotes(loadedNotes);
+        } catch (error) {
+            console.log('Error loading notes:', error);
+        }
+    };
+
+    // Загрузка предметов из расписания
+    const loadScheduleSubjects = () => {
+        try {
+            const results = db.getAllSync('SELECT DISTINCT subject FROM schedule WHERE date >= date("now") ORDER BY subject;') as any[];
+            const subjects = results.map(item => item.subject).filter(Boolean);
+            setScheduleSubjects(subjects);
+        } catch (error) {
+            console.log('Error loading schedule subjects:', error);
+        }
+    };
+
+    // Получение даты следующего занятия по предмету
+    const getNextClassDate = (subject: string): Date | null => {
+        try {
+            const result = db.getFirstSync(
+                'SELECT date FROM schedule WHERE subject = ? AND date >= date("now") AND type != "Лекция" ORDER BY date LIMIT 1;',
+                [subject]
+            ) as any;
+
+            if (result) {
+                return new Date(result.date);
+            }
+            return null;
+        } catch (error) {
+            console.log('Error getting next class date:', error);
+            return null;
+        }
+    };
 
     const showModal = () => setVisible(true);
     const hideModal = () => {
@@ -65,6 +114,7 @@ const NotesScreen = () => {
             title: '',
             content: '',
             subject: '',
+            deadlineType: 'none'
         });
         setSelectedDate(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000));
     };
@@ -82,46 +132,112 @@ const NotesScreen = () => {
         setShowDatePicker(true);
     };
 
+    // Добавление новой заметки
     const addNote = () => {
         if (!newNote.title.trim() || !newNote.content.trim() || !newNote.subject.trim()) {
             return;
         }
 
-        const note = {
+        let deadline: string | undefined;
+        let nextClassDate: string | undefined;
+
+        // Определяем дедлайн в зависимости от типа
+        if (newNote.deadlineType === 'date') {
+            deadline = selectedDate.toISOString();
+        } else if (newNote.deadlineType === 'next_class') {
+            const nextClass = getNextClassDate(newNote.subject);
+            if (nextClass) {
+                deadline = nextClass.toISOString();
+                nextClassDate = nextClass.toISOString();
+            }
+        }
+
+        const note: Note = {
             id: Date.now().toString(),
             title: newNote.title.trim(),
             content: newNote.content.trim(),
             subject: newNote.subject.trim(),
-            deadline: format(selectedDate, 'yyyy-MM-dd'),
-            createdAt: format(new Date(), 'yyyy-MM-dd'),
+            deadline,
+            deadlineType: newNote.deadlineType,
+            createdAt: new Date().toISOString(),
             important: false,
             completed: false,
+            nextClassDate
         };
 
-        setNotes(prevNotes => [note, ...prevNotes]);
-        hideModal();
+        try {
+            // Сохраняем в базу данных
+            db.runSync(
+                `INSERT INTO notes (id, title, content, subject, deadline, deadlineType, createdAt, important, completed, nextClassDate) 
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+                [
+                    note.id,
+                    note.title,
+                    note.content,
+                    note.subject,
+                    note.deadline || null,
+                    note.deadlineType,
+                    note.createdAt,
+                    note.important ? 1 : 0,
+                    note.completed ? 1 : 0,
+                    note.nextClassDate || null
+                ]
+            );
+
+            setNotes(prevNotes => [note, ...prevNotes]);
+            hideModal();
+        } catch (error) {
+            console.log('Error saving note:', error);
+        }
     };
 
-    const sortedNotes = [...notes].sort((a, b) => {
-        if (a.important && !b.important) return -1;
-        if (!a.important && b.important) return 1;
-
-        return new Date(a.deadline).getTime() - new Date(b.deadline).getTime();
-    });
-
+    // Переключение важности
     const toggleImportant = (id: string) => {
-        setNotes(notes.map(note =>
+        const updatedNotes = notes.map(note =>
             note.id === id ? { ...note, important: !note.important } : note
-        ));
+        );
+        setNotes(updatedNotes);
+
+        // Обновляем в базе данных
+        const note = updatedNotes.find(n => n.id === id);
+        if (note) {
+            db.runSync(
+                'UPDATE notes SET important = ? WHERE id = ?;',
+                [note.important ? 1 : 0, id]
+            );
+        }
     };
 
+    // Переключение выполнения
     const toggleCompleted = (id: string) => {
-        setNotes(notes.map(note =>
+        const updatedNotes = notes.map(note =>
             note.id === id ? { ...note, completed: !note.completed } : note
-        ));
+        );
+        setNotes(updatedNotes);
+
+        // Обновляем в базе данных
+        const note = updatedNotes.find(n => n.id === id);
+        if (note) {
+            db.runSync(
+                'UPDATE notes SET completed = ? WHERE id = ?;',
+                [note.completed ? 1 : 0, id]
+            );
+        }
     };
 
-    const getDeadlineColor = (deadline: string) => {
+    // Удаление заметки
+    const deleteNote = (id: string) => {
+        try {
+            db.runSync('DELETE FROM notes WHERE id = ?;', [id]);
+            setNotes(prevNotes => prevNotes.filter(note => note.id !== id));
+        } catch (error) {
+            console.log('Error deleting note:', error);
+        }
+    };
+
+    const getDeadlineColor = (deadline: string | undefined) => {
+        if (!deadline) return '#666';
+
         const deadlineDate = new Date(deadline);
         const today = new Date();
 
@@ -131,13 +247,19 @@ const NotesScreen = () => {
         return '#666';
     };
 
-    const getDeadlineText = (deadline: string) => {
-        const deadlineDate = new Date(deadline);
+    const getDeadlineText = (note: Note) => {
+        if (!note.deadline) return 'Без дедлайна';
+
+        const deadlineDate = new Date(note.deadline);
         const today = new Date();
 
         if (isToday(deadlineDate)) return 'Сегодня';
         if (isTomorrow(deadlineDate)) return 'Завтра';
         if (isAfter(today, deadlineDate)) return 'Просрочено';
+
+        if (note.deadlineType === 'next_class') {
+            return `До след. занятия: ${format(deadlineDate, 'd MMMM', { locale: ru })}`;
+        }
 
         return format(deadlineDate, 'd MMMM', { locale: ru });
     };
@@ -146,7 +268,29 @@ const NotesScreen = () => {
         return format(date, 'd MMMM yyyy', { locale: ru });
     };
 
-    const renderNote = ({ item }: any) => (
+    const getDeadlineTypeText = (type: string) => {
+        switch (type) {
+            case 'date': return 'Конкретная дата';
+            case 'next_class': return 'До следующего занятия';
+            case 'none': return 'Без дедлайна';
+            default: return type;
+        }
+    };
+
+    const sortedNotes = [...notes].sort((a, b) => {
+        if (a.important && !b.important) return -1;
+        if (!a.important && b.important) return 1;
+        if (!a.deadline && b.deadline) return 1;
+        if (a.deadline && !b.deadline) return -1;
+
+        if (a.deadline && b.deadline) {
+            return new Date(a.deadline).getTime() - new Date(b.deadline).getTime();
+        }
+
+        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    });
+
+    const renderNote = ({ item }: { item: Note }) => (
         <Card
             style={[
                 styles.noteCard,
@@ -170,7 +314,7 @@ const NotesScreen = () => {
                             backgroundColor: item.completed ? '#E8F5E8' : 'transparent'
                         }}
                     >
-                        {getDeadlineText(item.deadline)}
+                        {getDeadlineText(item)}
                     </Chip>
                 </View>
 
@@ -207,6 +351,15 @@ const NotesScreen = () => {
                         >
                             Готово
                         </Button>
+                        <Button
+                            mode="outlined"
+                            compact
+                            onPress={() => deleteNote(item.id)}
+                            style={styles.smallButton}
+                            textColor="#FF6B6B"
+                        >
+                            Удалить
+                        </Button>
                     </View>
                 </View>
             </Card.Content>
@@ -240,27 +393,68 @@ const NotesScreen = () => {
                         <Card>
                             <Card.Content>
                                 <Title style={styles.modalTitle}>Новая заметка</Title>
-                                
+
+                                {/* Выбор предмета */}
+                                <View style={styles.menuContainer}>
+                                    <Text style={styles.label}>Предмет *</Text>
+                                    <Menu
+                                        visible={subjectMenuVisible}
+                                        onDismiss={() => setSubjectMenuVisible(false)}
+                                        anchor={
+                                            <Button
+                                                mode="outlined"
+                                                onPress={() => setSubjectMenuVisible(true)}
+                                                style={styles.menuButton}
+                                                icon="book"
+                                            >
+                                                {newNote.subject || 'Выберите предмет'}
+                                            </Button>
+                                        }
+                                    >
+                                        {scheduleSubjects.map((subject) => (
+                                            <Menu.Item
+                                                key={subject}
+                                                title={subject}
+                                                onPress={() => {
+                                                    setNewNote({...newNote, subject});
+                                                    setSubjectMenuVisible(false);
+                                                }}
+                                            />
+                                        ))}
+                                        <Divider />
+                                        <Menu.Item
+                                            title="Другой предмет..."
+                                            onPress={() => {
+                                                setNewNote({...newNote, subject: ''});
+                                                setSubjectMenuVisible(false);
+                                            }}
+                                        />
+                                    </Menu>
+                                </View>
+
+                                {/* Поле для ввода своего предмета */}
+                                {!newNote.subject && (
+                                    <TextInput
+                                        label="Введите предмет *"
+                                        value={newNote.subject}
+                                        onChangeText={(text) => setNewNote({...newNote, subject: text})}
+                                        mode="outlined"
+                                        style={styles.input}
+                                        placeholder="Например: Математика"
+                                    />
+                                )}
+
                                 <TextInput
-                                    label="Предмет"
-                                    value={newNote.subject}
-                                    onChangeText={(text) => setNewNote({...newNote, subject: text})}
-                                    mode="outlined"
-                                    style={styles.input}
-                                    placeholder="Например: Математика"
-                                />
-                                
-                                <TextInput
-                                    label="Заголовок"
+                                    label="Заголовок *"
                                     value={newNote.title}
                                     onChangeText={(text) => setNewNote({...newNote, title: text})}
                                     mode="outlined"
                                     style={styles.input}
-                                    placeholder="Краткое описание"
+                                    placeholder="Краткое описание задания"
                                 />
-                                
+
                                 <TextInput
-                                    label="Описание"
+                                    label="Описание *"
                                     value={newNote.content}
                                     onChangeText={(text) => setNewNote({...newNote, content: text})}
                                     mode="outlined"
@@ -269,18 +463,84 @@ const NotesScreen = () => {
                                     style={styles.input}
                                     placeholder="Подробное описание задания"
                                 />
-                                
-                                <View style={styles.dateSection}>
-                                    <Text style={styles.dateLabel}>Дедлайн</Text>
-                                    <Button 
-                                        mode="outlined" 
-                                        onPress={showDatepicker}
-                                        style={styles.dateButton}
-                                        icon="calendar"
+
+                                {/* Выбор типа дедлайна */}
+                                <View style={styles.menuContainer}>
+                                    <Text style={styles.label}>Дедлайн</Text>
+                                    <Menu
+                                        visible={deadlineTypeMenuVisible}
+                                        onDismiss={() => setDeadlineTypeMenuVisible(false)}
+                                        anchor={
+                                            <Button
+                                                mode="outlined"
+                                                onPress={() => setDeadlineTypeMenuVisible(true)}
+                                                style={styles.menuButton}
+                                                icon="calendar"
+                                            >
+                                                {getDeadlineTypeText(newNote.deadlineType)}
+                                            </Button>
+                                        }
                                     >
-                                        {formatDisplayDate(selectedDate)}
-                                    </Button>
+                                        <Menu.Item
+                                            title="Без дедлайна"
+                                            onPress={() => {
+                                                setNewNote({...newNote, deadlineType: 'none'});
+                                                setDeadlineTypeMenuVisible(false);
+                                            }}
+                                        />
+                                        <Menu.Item
+                                            title="До следующего занятия"
+                                            onPress={() => {
+                                                if (newNote.subject) {
+                                                    const nextClass = getNextClassDate(newNote.subject);
+                                                    if (nextClass) {
+                                                        setNewNote({...newNote, deadlineType: 'next_class'});
+                                                    } else {
+                                                        alert('Следующих занятий по этому предмету не найдено');
+                                                    }
+                                                } else {
+                                                    alert('Сначала выберите предмет');
+                                                }
+                                                setDeadlineTypeMenuVisible(false);
+                                            }}
+                                        />
+                                        <Menu.Item
+                                            title="Конкретная дата"
+                                            onPress={() => {
+                                                setNewNote({...newNote, deadlineType: 'date'});
+                                                setDeadlineTypeMenuVisible(false);
+                                            }}
+                                        />
+                                    </Menu>
                                 </View>
+
+                                {/* Выбор даты, если выбран тип "date" */}
+                                {newNote.deadlineType === 'date' && (
+                                    <View style={styles.dateSection}>
+                                        <Text style={styles.dateLabel}>Дата выполнения</Text>
+                                        <Button
+                                            mode="outlined"
+                                            onPress={showDatepicker}
+                                            style={styles.dateButton}
+                                            icon="calendar"
+                                        >
+                                            {formatDisplayDate(selectedDate)}
+                                        </Button>
+                                    </View>
+                                )}
+
+                                {/* Информация о следующем занятии */}
+                                {newNote.deadlineType === 'next_class' && newNote.subject && (
+                                    <View style={styles.infoSection}>
+                                        <Text style={styles.infoText}>
+                                            Следующее занятие: {
+                                            getNextClassDate(newNote.subject)
+                                                ? formatDisplayDate(getNextClassDate(newNote.subject)!)
+                                                : 'не найдено'
+                                        }
+                                        </Text>
+                                    </View>
+                                )}
 
                                 {showDatePicker && (
                                     <DateTimePicker
@@ -293,15 +553,15 @@ const NotesScreen = () => {
                                 )}
                             </Card.Content>
                             <Card.Actions style={styles.modalActions}>
-                                <Button 
-                                    mode="outlined" 
+                                <Button
+                                    mode="outlined"
                                     onPress={hideModal}
                                     style={styles.modalButton}
                                 >
                                     Отмена
                                 </Button>
-                                <Button 
-                                    mode="contained" 
+                                <Button
+                                    mode="contained"
                                     onPress={addNote}
                                     style={styles.modalButton}
                                     disabled={!newNote.title.trim() || !newNote.content.trim() || !newNote.subject.trim()}
@@ -395,6 +655,19 @@ const styles = StyleSheet.create({
     input: {
         marginBottom: 12,
     },
+    menuContainer: {
+        marginBottom: 12,
+    },
+    label: {
+        fontSize: 16,
+        fontWeight: 'bold',
+        marginBottom: 8,
+        color: '#333',
+    },
+    menuButton: {
+        borderColor: '#1E88E5',
+        justifyContent: 'flex-start',
+    },
     dateSection: {
         marginBottom: 12,
     },
@@ -406,6 +679,17 @@ const styles = StyleSheet.create({
     },
     dateButton: {
         borderColor: '#1E88E5',
+    },
+    infoSection: {
+        backgroundColor: '#E3F2FD',
+        padding: 12,
+        borderRadius: 8,
+        marginBottom: 12,
+    },
+    infoText: {
+        color: '#1E88E5',
+        fontSize: 14,
+        fontStyle: 'italic',
     },
     modalActions: {
         justifyContent: 'space-between',
