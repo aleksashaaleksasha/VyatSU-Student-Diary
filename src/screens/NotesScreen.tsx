@@ -1,6 +1,5 @@
-// NotesScreen.tsx - улучшенная версия
 import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, FlatList, Platform } from 'react-native';
+import { View, StyleSheet, FlatList, Animated } from 'react-native';
 import {
     Card,
     Title,
@@ -13,12 +12,15 @@ import {
     TextInput,
     Provider as PaperProvider,
     Menu,
-    Divider
+    Divider,
+    Avatar,
+    SegmentedButtons,
 } from 'react-native-paper';
-import { format, isAfter, isToday, isTomorrow, addDays, isSameDay } from 'date-fns';
+import { format, isAfter, isToday, isTomorrow } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import * as SQLite from 'expo-sqlite';
+import { LinearGradient } from 'expo-linear-gradient';
 
 const db = SQLite.openDatabaseSync('student_diary.db');
 
@@ -35,21 +37,16 @@ interface Note {
     nextClassDate?: string;
 }
 
-interface ScheduleItem {
-    id: number;
-    subject: string;
-    date: Date;
-    type: string;
-}
-
 const NotesScreen = () => {
     const [notes, setNotes] = useState<Note[]>([]);
-    const [scheduleSubjects, setScheduleSubjects] = useState<string[]>([]);
+    const [filter, setFilter] = useState<'all' | 'active' | 'completed'>('all');
     const [visible, setVisible] = useState(false);
     const [showDatePicker, setShowDatePicker] = useState(false);
     const [selectedDate, setSelectedDate] = useState(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000));
     const [subjectMenuVisible, setSubjectMenuVisible] = useState(false);
     const [deadlineTypeMenuVisible, setDeadlineTypeMenuVisible] = useState(false);
+    const [scheduleSubjects, setScheduleSubjects] = useState<string[]>([]);
+    const fadeAnim = useState(new Animated.Value(0))[0];
 
     const [newNote, setNewNote] = useState({
         title: '',
@@ -58,13 +55,16 @@ const NotesScreen = () => {
         deadlineType: 'none' as 'date' | 'next_class' | 'none'
     });
 
-    // Загрузка данных при монтировании
     useEffect(() => {
         loadNotes();
         loadScheduleSubjects();
+        Animated.timing(fadeAnim, {
+            toValue: 1,
+            duration: 500,
+            useNativeDriver: true,
+        }).start();
     }, []);
 
-    // Загрузка заметок из базы данных
     const loadNotes = () => {
         try {
             const results = db.getAllSync('SELECT * FROM notes ORDER BY createdAt DESC;') as any[];
@@ -78,7 +78,6 @@ const NotesScreen = () => {
         }
     };
 
-    // Загрузка предметов из расписания
     const loadScheduleSubjects = () => {
         try {
             const results = db.getAllSync('SELECT DISTINCT subject FROM schedule WHERE date >= date("now") ORDER BY subject;') as any[];
@@ -89,7 +88,6 @@ const NotesScreen = () => {
         }
     };
 
-    // Получение даты следующего занятия по предмету
     const getNextClassDate = (subject: string): Date | null => {
         try {
             const result = db.getFirstSync(
@@ -119,20 +117,6 @@ const NotesScreen = () => {
         setSelectedDate(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000));
     };
 
-    const onDateChange = (event: any, date?: Date) => {
-        if (Platform.OS === 'android') {
-            setShowDatePicker(false);
-        }
-        if (date) {
-            setSelectedDate(date);
-        }
-    };
-
-    const showDatepicker = () => {
-        setShowDatePicker(true);
-    };
-
-    // Добавление новой заметки
     const addNote = () => {
         if (!newNote.title.trim() || !newNote.content.trim() || !newNote.subject.trim()) {
             return;
@@ -141,7 +125,6 @@ const NotesScreen = () => {
         let deadline: string | undefined;
         let nextClassDate: string | undefined;
 
-        // Определяем дедлайн в зависимости от типа
         if (newNote.deadlineType === 'date') {
             deadline = selectedDate.toISOString();
         } else if (newNote.deadlineType === 'next_class') {
@@ -166,10 +149,9 @@ const NotesScreen = () => {
         };
 
         try {
-            // Сохраняем в базу данных
             db.runSync(
                 `INSERT INTO notes (id, title, content, subject, deadline, deadlineType, createdAt, important, completed, nextClassDate) 
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
                 [
                     note.id,
                     note.title,
@@ -191,14 +173,12 @@ const NotesScreen = () => {
         }
     };
 
-    // Переключение важности
     const toggleImportant = (id: string) => {
         const updatedNotes = notes.map(note =>
             note.id === id ? { ...note, important: !note.important } : note
         );
         setNotes(updatedNotes);
 
-        // Обновляем в базе данных
         const note = updatedNotes.find(n => n.id === id);
         if (note) {
             db.runSync(
@@ -208,14 +188,12 @@ const NotesScreen = () => {
         }
     };
 
-    // Переключение выполнения
     const toggleCompleted = (id: string) => {
         const updatedNotes = notes.map(note =>
             note.id === id ? { ...note, completed: !note.completed } : note
         );
         setNotes(updatedNotes);
 
-        // Обновляем в базе данных
         const note = updatedNotes.find(n => n.id === id);
         if (note) {
             db.runSync(
@@ -225,7 +203,6 @@ const NotesScreen = () => {
         }
     };
 
-    // Удаление заметки
     const deleteNote = (id: string) => {
         try {
             db.runSync('DELETE FROM notes WHERE id = ?;', [id]);
@@ -236,15 +213,15 @@ const NotesScreen = () => {
     };
 
     const getDeadlineColor = (deadline: string | undefined) => {
-        if (!deadline) return '#666';
+        if (!deadline) return '#64748B';
 
         const deadlineDate = new Date(deadline);
         const today = new Date();
 
-        if (isToday(deadlineDate)) return '#FF6B6B';
-        if (isTomorrow(deadlineDate)) return '#FFA726';
-        if (isAfter(today, deadlineDate)) return '#D32F2F';
-        return '#666';
+        if (isToday(deadlineDate)) return '#EF4444';
+        if (isTomorrow(deadlineDate)) return '#F59E0B';
+        if (isAfter(today, deadlineDate)) return '#DC2626';
+        return '#10B981';
     };
 
     const getDeadlineText = (note: Note) => {
@@ -258,10 +235,33 @@ const NotesScreen = () => {
         if (isAfter(today, deadlineDate)) return 'Просрочено';
 
         if (note.deadlineType === 'next_class') {
-            return `До след. занятия: ${format(deadlineDate, 'd MMMM', { locale: ru })}`;
+            return `До занятия: ${format(deadlineDate, 'd MMM', { locale: ru })}`;
         }
 
-        return format(deadlineDate, 'd MMMM', { locale: ru });
+        return format(deadlineDate, 'd MMM', { locale: ru });
+    };
+
+    const getFilteredNotes = () => {
+        let filtered = [...notes];
+
+        if (filter === 'active') {
+            filtered = filtered.filter(note => !note.completed);
+        } else if (filter === 'completed') {
+            filtered = filtered.filter(note => note.completed);
+        }
+
+        return filtered.sort((a, b) => {
+            if (a.important && !b.important) return -1;
+            if (!a.important && b.important) return 1;
+            if (!a.deadline && b.deadline) return 1;
+            if (a.deadline && !b.deadline) return -1;
+
+            if (a.deadline && b.deadline) {
+                return new Date(a.deadline).getTime() - new Date(b.deadline).getTime();
+            }
+
+            return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+        });
     };
 
     const formatDisplayDate = (date: Date) => {
@@ -277,105 +277,221 @@ const NotesScreen = () => {
         }
     };
 
-    const sortedNotes = [...notes].sort((a, b) => {
-        if (a.important && !b.important) return -1;
-        if (!a.important && b.important) return 1;
-        if (!a.deadline && b.deadline) return 1;
-        if (a.deadline && !b.deadline) return -1;
-
-        if (a.deadline && b.deadline) {
-            return new Date(a.deadline).getTime() - new Date(b.deadline).getTime();
+    const onDateChange = (event: any, date?: Date) => {
+        setShowDatePicker(false);
+        if (date) {
+            setSelectedDate(date);
         }
+    };
 
-        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-    });
-
-    const renderNote = ({ item }: { item: Note }) => (
-        <Card
+    const renderNote = ({ item, index }: { item: Note; index: number }) => (
+        <Animated.View
             style={[
+                styles.noteContainer,
+                {
+                    opacity: fadeAnim,
+                    transform: [{
+                        translateY: fadeAnim.interpolate({
+                            inputRange: [0, 1],
+                            outputRange: [50 * (index + 1), 0],
+                        }),
+                    }],
+                },
+            ]}
+        >
+            <Card style={[
                 styles.noteCard,
                 item.completed && styles.completedCard,
                 item.important && styles.importantCard
-            ]}
-        >
-            <Card.Content>
-                <View style={styles.noteHeader}>
-                    <Title style={[styles.title, item.completed && styles.completedText]}>
-                        {item.title}
-                    </Title>
-                    <Chip
-                        mode="outlined"
-                        textStyle={{
-                            color: getDeadlineColor(item.deadline),
-                            fontSize: 12
-                        }}
-                        style={{
-                            borderColor: getDeadlineColor(item.deadline),
-                            backgroundColor: item.completed ? '#E8F5E8' : 'transparent'
-                        }}
-                    >
-                        {getDeadlineText(item)}
-                    </Chip>
-                </View>
-
-                <Text
-                    style={[styles.content, item.completed && styles.completedText]}
-                    numberOfLines={3}
+            ]}>
+                <LinearGradient
+                    colors={item.important ?
+                        ['#FEF3C7', '#FEF3C7'] :
+                        item.completed ?
+                            ['#F1F5F9', '#F1F5F9'] :
+                            ['#FFFFFF', '#F8FAFC']
+                    }
+                    style={styles.cardGradient}
                 >
-                    {item.content}
-                </Text>
+                    <Card.Content>
+                        <View style={styles.noteHeader}>
+                            <View style={styles.titleSection}>
+                                <Title style={[
+                                    styles.title,
+                                    item.completed && styles.completedText
+                                ]}>
+                                    {item.title}
+                                </Title>
+                                {item.important && (
+                                    <Avatar.Icon
+                                        size={24}
+                                        icon="star"
+                                        style={styles.importantIcon}
+                                    />
+                                )}
+                            </View>
 
-                <View style={styles.noteFooter}>
-                    <Chip
-                        mode="outlined"
-                        style={styles.subjectChip}
-                        textStyle={{ fontSize: 12 }}
-                    >
-                        {item.subject}
-                    </Chip>
+                            <Chip
+                                mode="flat"
+                                style={[
+                                    styles.deadlineChip,
+                                    {
+                                        backgroundColor: getDeadlineColor(item.deadline) + '20',
+                                        borderColor: getDeadlineColor(item.deadline) + '40',
+                                    }
+                                ]}
+                                textStyle={{
+                                    color: getDeadlineColor(item.deadline),
+                                    fontSize: 12,
+                                    fontWeight: '600'
+                                }}
+                            >
+                                {getDeadlineText(item)}
+                            </Chip>
+                        </View>
 
-                    <View style={styles.actions}>
-                        <Button
-                            mode={item.important ? "contained" : "outlined"}
-                            compact
-                            onPress={() => toggleImportant(item.id)}
-                            style={styles.smallButton}
+                        <Text
+                            style={[styles.content, item.completed && styles.completedText]}
+                            numberOfLines={3}
                         >
-                            Важно
-                        </Button>
-                        <Button
-                            mode={item.completed ? "contained" : "outlined"}
-                            compact
-                            onPress={() => toggleCompleted(item.id)}
-                            style={styles.smallButton}
-                        >
-                            Готово
-                        </Button>
-                        <Button
-                            mode="outlined"
-                            compact
-                            onPress={() => deleteNote(item.id)}
-                            style={styles.smallButton}
-                            textColor="#FF6B6B"
-                        >
-                            Удалить
-                        </Button>
-                    </View>
-                </View>
-            </Card.Content>
-        </Card>
+                            {item.content}
+                        </Text>
+
+                        <View style={styles.noteFooter}>
+                            <Chip
+                                mode="flat"
+                                style={styles.subjectChip}
+                                textStyle={{ fontSize: 12, fontWeight: '500' }}
+                                avatar={
+                                    <Avatar.Icon
+                                        size={20}
+                                        icon="book"
+                                        style={styles.subjectIcon}
+                                    />
+                                }
+                            >
+                                {item.subject}
+                            </Chip>
+
+                            <View style={styles.actions}>
+                                <Button
+                                    mode={item.important ? "contained" : "outlined"}
+                                    compact
+                                    onPress={() => toggleImportant(item.id)}
+                                    style={styles.smallButton}
+                                    icon="star"
+                                >
+                                    {''}
+                                </Button>
+                                <Button
+                                    mode={item.completed ? "contained" : "outlined"}
+                                    compact
+                                    onPress={() => toggleCompleted(item.id)}
+                                    style={styles.smallButton}
+                                    icon={item.completed ? "check-circle" : "circle-outline"}
+                                >
+                                    {''}
+                                </Button>
+                                <Button
+                                    mode="outlined"
+                                    compact
+                                    onPress={() => deleteNote(item.id)}
+                                    style={styles.smallButton}
+                                    icon="delete"
+                                    textColor="#EF4444"
+                                >
+                                    {''}
+                                </Button>
+                            </View>
+                        </View>
+                    </Card.Content>
+                </LinearGradient>
+            </Card>
+        </Animated.View>
     );
 
     return (
         <PaperProvider>
             <View style={styles.container}>
-                <FlatList
-                    data={sortedNotes}
-                    keyExtractor={item => item.id}
-                    renderItem={renderNote}
-                    contentContainerStyle={styles.listContent}
-                    showsVerticalScrollIndicator={false}
-                />
+                {/* Хедер с фильтрами */}
+                <LinearGradient
+                    colors={['#EC4899', '#F472B6']}
+                    style={styles.headerGradient}
+                >
+                    <View style={styles.headerContent}>
+                        <Title style={styles.headerTitle}>Мои заметки</Title>
+                        <Text style={styles.headerSubtitle}>
+                            {getFilteredNotes().length} заметок
+                        </Text>
+                    </View>
+
+                    <SegmentedButtons
+                        value={filter}
+                        onValueChange={setFilter}
+                        buttons={[
+                            {
+                                value: 'all',
+                                label: 'Все',
+                                style: {
+                                    backgroundColor: filter === 'all' ? '#FFFFFF20' : 'transparent',
+                                },
+                            },
+                            {
+                                value: 'active',
+                                label: 'Активные',
+                                style: {
+                                    backgroundColor: filter === 'active' ? '#FFFFFF20' : 'transparent',
+                                },
+                            },
+                            {
+                                value: 'completed',
+                                label: 'Выполнены',
+                                style: {
+                                    backgroundColor: filter === 'completed' ? '#FFFFFF20' : 'transparent',
+                                },
+                            },
+                        ]}
+                        style={styles.segmentedButtons}
+                    />
+                </LinearGradient>
+
+                <View style={styles.content}>
+                    {getFilteredNotes().length === 0 ? (
+                        <View style={styles.emptyState}>
+                            <Avatar.Icon
+                                size={80}
+                                icon="note"
+                                style={styles.emptyIcon}
+                            />
+                            <Title style={styles.emptyTitle}>
+                                {filter === 'completed' ? 'Нет выполненных заметок' : 'Заметок пока нет'}
+                            </Title>
+                            <Text style={styles.emptyText}>
+                                {filter === 'completed'
+                                    ? 'Выполненные заметки появятся здесь'
+                                    : 'Создайте первую заметку для отслеживания заданий'
+                                }
+                            </Text>
+                            <Button
+                                mode="contained"
+                                icon="plus"
+                                onPress={showModal}
+                                style={styles.emptyButton}
+                            >
+                                Создать заметку
+                            </Button>
+                        </View>
+                    ) : (
+                        <FlatList
+                            data={getFilteredNotes()}
+                            keyExtractor={item => item.id}
+                            renderItem={renderNote}
+                            contentContainerStyle={styles.listContent}
+                            showsVerticalScrollIndicator={false}
+                            ItemSeparatorComponent={() => <View style={styles.separator} />}
+                        />
+                    )}
+                </View>
 
                 <FAB
                     icon="plus"
@@ -384,191 +500,178 @@ const NotesScreen = () => {
                     color="#FFFFFF"
                 />
 
+                {/* Модальное окно создания заметки */}
                 <Portal>
                     <Modal
                         visible={visible}
                         onDismiss={hideModal}
                         contentContainerStyle={styles.modalContainer}
                     >
-                        <Card>
-                            <Card.Content>
-                                <Title style={styles.modalTitle}>Новая заметка</Title>
+                        <Card style={styles.modalCard}>
+                            <LinearGradient
+                                colors={['#FFFFFF', '#F8FAFC']}
+                                style={styles.modalGradient}
+                            >
+                                <Card.Content>
+                                    <Title style={styles.modalTitle}>Новая заметка</Title>
 
-                                {/* Выбор предмета */}
-                                <View style={styles.menuContainer}>
-                                    <Text style={styles.label}>Предмет *</Text>
-                                    <Menu
-                                        visible={subjectMenuVisible}
-                                        onDismiss={() => setSubjectMenuVisible(false)}
-                                        anchor={
-                                            <Button
-                                                mode="outlined"
-                                                onPress={() => setSubjectMenuVisible(true)}
-                                                style={styles.menuButton}
-                                                icon="book"
-                                            >
-                                                {newNote.subject || 'Выберите предмет'}
-                                            </Button>
-                                        }
-                                    >
-                                        {scheduleSubjects.map((subject) => (
+                                    <View style={styles.menuContainer}>
+                                        <Text style={styles.label}>Предмет *</Text>
+                                        <Menu
+                                            visible={subjectMenuVisible}
+                                            onDismiss={() => setSubjectMenuVisible(false)}
+                                            anchor={
+                                                <Button
+                                                    mode="outlined"
+                                                    onPress={() => setSubjectMenuVisible(true)}
+                                                    style={styles.menuButton}
+                                                    icon="book"
+                                                    contentStyle={styles.menuButtonContent}
+                                                >
+                                                    {newNote.subject || 'Выберите предмет'}
+                                                </Button>
+                                            }
+                                        >
+                                            {scheduleSubjects.map((subject) => (
+                                                <Menu.Item
+                                                    key={subject}
+                                                    title={subject}
+                                                    onPress={() => {
+                                                        setNewNote({...newNote, subject});
+                                                        setSubjectMenuVisible(false);
+                                                    }}
+                                                />
+                                            ))}
+                                            <Divider />
                                             <Menu.Item
-                                                key={subject}
-                                                title={subject}
+                                                title="Другой предмет..."
                                                 onPress={() => {
-                                                    setNewNote({...newNote, subject});
+                                                    setNewNote({...newNote, subject: ''});
                                                     setSubjectMenuVisible(false);
                                                 }}
                                             />
-                                        ))}
-                                        <Divider />
-                                        <Menu.Item
-                                            title="Другой предмет..."
-                                            onPress={() => {
-                                                setNewNote({...newNote, subject: ''});
-                                                setSubjectMenuVisible(false);
-                                            }}
-                                        />
-                                    </Menu>
-                                </View>
+                                        </Menu>
+                                    </View>
 
-                                {/* Поле для ввода своего предмета */}
-                                {!newNote.subject && (
+                                    {!newNote.subject && (
+                                        <TextInput
+                                            label="Введите предмет *"
+                                            value={newNote.subject}
+                                            onChangeText={(text) => setNewNote({...newNote, subject: text})}
+                                            mode="outlined"
+                                            style={styles.input}
+                                            placeholder="Например: Математика"
+                                        />
+                                    )}
+
                                     <TextInput
-                                        label="Введите предмет *"
-                                        value={newNote.subject}
-                                        onChangeText={(text) => setNewNote({...newNote, subject: text})}
+                                        label="Заголовок *"
+                                        value={newNote.title}
+                                        onChangeText={(text) => setNewNote({...newNote, title: text})}
                                         mode="outlined"
                                         style={styles.input}
-                                        placeholder="Например: Математика"
+                                        placeholder="Краткое описание задания"
                                     />
-                                )}
 
-                                <TextInput
-                                    label="Заголовок *"
-                                    value={newNote.title}
-                                    onChangeText={(text) => setNewNote({...newNote, title: text})}
-                                    mode="outlined"
-                                    style={styles.input}
-                                    placeholder="Краткое описание задания"
-                                />
+                                    <TextInput
+                                        label="Описание *"
+                                        value={newNote.content}
+                                        onChangeText={(text) => setNewNote({...newNote, content: text})}
+                                        mode="outlined"
+                                        multiline
+                                        numberOfLines={3}
+                                        style={styles.input}
+                                        placeholder="Подробное описание задания"
+                                    />
 
-                                <TextInput
-                                    label="Описание *"
-                                    value={newNote.content}
-                                    onChangeText={(text) => setNewNote({...newNote, content: text})}
-                                    mode="outlined"
-                                    multiline
-                                    numberOfLines={3}
-                                    style={styles.input}
-                                    placeholder="Подробное описание задания"
-                                />
+                                    <View style={styles.menuContainer}>
+                                        <Text style={styles.label}>Дедлайн</Text>
+                                        <Menu
+                                            visible={deadlineTypeMenuVisible}
+                                            onDismiss={() => setDeadlineTypeMenuVisible(false)}
+                                            anchor={
+                                                <Button
+                                                    mode="outlined"
+                                                    onPress={() => setDeadlineTypeMenuVisible(true)}
+                                                    style={styles.menuButton}
+                                                    icon="calendar"
+                                                    contentStyle={styles.menuButtonContent}
+                                                >
+                                                    {getDeadlineTypeText(newNote.deadlineType)}
+                                                </Button>
+                                            }
+                                        >
+                                            <Menu.Item
+                                                title="Без дедлайна"
+                                                onPress={() => {
+                                                    setNewNote({...newNote, deadlineType: 'none'});
+                                                    setDeadlineTypeMenuVisible(false);
+                                                }}
+                                            />
+                                            <Menu.Item
+                                                title="До следующего занятия"
+                                                onPress={() => {
+                                                    if (newNote.subject) {
+                                                        const nextClass = getNextClassDate(newNote.subject);
+                                                        if (nextClass) {
+                                                            setNewNote({...newNote, deadlineType: 'next_class'});
+                                                        }
+                                                    }
+                                                    setDeadlineTypeMenuVisible(false);
+                                                }}
+                                            />
+                                            <Menu.Item
+                                                title="Конкретная дата"
+                                                onPress={() => {
+                                                    setNewNote({...newNote, deadlineType: 'date'});
+                                                    setDeadlineTypeMenuVisible(false);
+                                                }}
+                                            />
+                                        </Menu>
+                                    </View>
 
-                                {/* Выбор типа дедлайна */}
-                                <View style={styles.menuContainer}>
-                                    <Text style={styles.label}>Дедлайн</Text>
-                                    <Menu
-                                        visible={deadlineTypeMenuVisible}
-                                        onDismiss={() => setDeadlineTypeMenuVisible(false)}
-                                        anchor={
+                                    {newNote.deadlineType === 'date' && (
+                                        <View style={styles.dateSection}>
+                                            <Text style={styles.dateLabel}>Дата выполнения</Text>
                                             <Button
                                                 mode="outlined"
-                                                onPress={() => setDeadlineTypeMenuVisible(true)}
-                                                style={styles.menuButton}
+                                                onPress={() => setShowDatePicker(true)}
+                                                style={styles.dateButton}
                                                 icon="calendar"
                                             >
-                                                {getDeadlineTypeText(newNote.deadlineType)}
+                                                {formatDisplayDate(selectedDate)}
                                             </Button>
-                                        }
+                                        </View>
+                                    )}
+
+                                    {showDatePicker && (
+                                        <DateTimePicker
+                                            value={selectedDate}
+                                            mode="date"
+                                            display="default"
+                                            onChange={onDateChange}
+                                            minimumDate={new Date()}
+                                        />
+                                    )}
+                                </Card.Content>
+                                <Card.Actions style={styles.modalActions}>
+                                    <Button
+                                        mode="outlined"
+                                        onPress={hideModal}
+                                        style={styles.modalButton}
                                     >
-                                        <Menu.Item
-                                            title="Без дедлайна"
-                                            onPress={() => {
-                                                setNewNote({...newNote, deadlineType: 'none'});
-                                                setDeadlineTypeMenuVisible(false);
-                                            }}
-                                        />
-                                        <Menu.Item
-                                            title="До следующего занятия"
-                                            onPress={() => {
-                                                if (newNote.subject) {
-                                                    const nextClass = getNextClassDate(newNote.subject);
-                                                    if (nextClass) {
-                                                        setNewNote({...newNote, deadlineType: 'next_class'});
-                                                    } else {
-                                                        alert('Следующих занятий по этому предмету не найдено');
-                                                    }
-                                                } else {
-                                                    alert('Сначала выберите предмет');
-                                                }
-                                                setDeadlineTypeMenuVisible(false);
-                                            }}
-                                        />
-                                        <Menu.Item
-                                            title="Конкретная дата"
-                                            onPress={() => {
-                                                setNewNote({...newNote, deadlineType: 'date'});
-                                                setDeadlineTypeMenuVisible(false);
-                                            }}
-                                        />
-                                    </Menu>
-                                </View>
-
-                                {/* Выбор даты, если выбран тип "date" */}
-                                {newNote.deadlineType === 'date' && (
-                                    <View style={styles.dateSection}>
-                                        <Text style={styles.dateLabel}>Дата выполнения</Text>
-                                        <Button
-                                            mode="outlined"
-                                            onPress={showDatepicker}
-                                            style={styles.dateButton}
-                                            icon="calendar"
-                                        >
-                                            {formatDisplayDate(selectedDate)}
-                                        </Button>
-                                    </View>
-                                )}
-
-                                {/* Информация о следующем занятии */}
-                                {newNote.deadlineType === 'next_class' && newNote.subject && (
-                                    <View style={styles.infoSection}>
-                                        <Text style={styles.infoText}>
-                                            Следующее занятие: {
-                                            getNextClassDate(newNote.subject)
-                                                ? formatDisplayDate(getNextClassDate(newNote.subject)!)
-                                                : 'не найдено'
-                                        }
-                                        </Text>
-                                    </View>
-                                )}
-
-                                {showDatePicker && (
-                                    <DateTimePicker
-                                        value={selectedDate}
-                                        mode="date"
-                                        display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                                        onChange={onDateChange}
-                                        minimumDate={new Date()}
-                                    />
-                                )}
-                            </Card.Content>
-                            <Card.Actions style={styles.modalActions}>
-                                <Button
-                                    mode="outlined"
-                                    onPress={hideModal}
-                                    style={styles.modalButton}
-                                >
-                                    Отмена
-                                </Button>
-                                <Button
-                                    mode="contained"
-                                    onPress={addNote}
-                                    style={styles.modalButton}
-                                    disabled={!newNote.title.trim() || !newNote.content.trim() || !newNote.subject.trim()}
-                                >
-                                    Добавить
-                                </Button>
-                            </Card.Actions>
+                                        Отмена
+                                    </Button>
+                                    <Button
+                                        mode="contained"
+                                        onPress={addNote}
+                                        style={styles.modalButton}
+                                        disabled={!newNote.title.trim() || !newNote.content.trim() || !newNote.subject.trim()}
+                                    >
+                                        Добавить
+                                    </Button>
+                                </Card.Actions>
+                            </LinearGradient>
                         </Card>
                     </Modal>
                 </Portal>
@@ -580,45 +683,93 @@ const NotesScreen = () => {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: '#f8f9fa',
-        padding: 16,
+        backgroundColor: '#F8FAFC',
+    },
+    headerGradient: {
+        paddingTop: 60,
+        paddingBottom: 20,
+        borderBottomLeftRadius: 24,
+        borderBottomRightRadius: 24,
+    },
+    headerContent: {
+        alignItems: 'center',
+        paddingHorizontal: 20,
+        marginBottom: 16,
+    },
+    headerTitle: {
+        color: '#FFFFFF',
+        fontSize: 28,
+        fontWeight: '700',
+    },
+    headerSubtitle: {
+        color: '#FFFFFF',
+        fontSize: 16,
+        opacity: 0.9,
+        marginTop: 4,
+    },
+    segmentedButtons: {
+        marginHorizontal: 20,
     },
     listContent: {
-        paddingBottom: 80,
+        paddingBottom: 20,
+    },
+    noteContainer: {
+        marginBottom: 12,
     },
     noteCard: {
-        marginBottom: 12,
-        backgroundColor: '#FFFFFF',
+        borderRadius: 16,
+        elevation: 2,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 8,
+    },
+    cardGradient: {
+        borderRadius: 16,
+    },
+    completedCard: {
+        opacity: 0.7,
     },
     importantCard: {
         borderLeftWidth: 4,
-        borderLeftColor: '#1E88E5',
-    },
-    completedCard: {
-        backgroundColor: '#f8f9fa',
-        opacity: 0.7,
+        borderLeftColor: '#F59E0B',
     },
     noteHeader: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'flex-start',
-        marginBottom: 8,
+        marginBottom: 12,
+    },
+    titleSection: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        flex: 1,
+        marginRight: 12,
     },
     title: {
         fontSize: 16,
-        fontWeight: 'bold',
+        fontWeight: '700',
         flex: 1,
-        marginRight: 8,
+        color: '#1E293B',
     },
-    completedText: {
-        textDecorationLine: 'line-through',
-        color: '#666',
+    importantIcon: {
+        backgroundColor: '#F59E0B',
+        marginLeft: 8,
+    },
+    deadlineChip: {
+        borderWidth: 1,
     },
     content: {
         fontSize: 14,
-        color: '#333',
-        marginBottom: 12,
+        color: '#475569',
+        marginBottom: 16,
         lineHeight: 20,
+        flex: 1,
+        padding: 20,
+    },
+    completedText: {
+        textDecorationLine: 'line-through',
+        color: '#94A3B8',
     },
     noteFooter: {
         flexDirection: 'row',
@@ -626,8 +777,10 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     subjectChip: {
-        backgroundColor: '#E3F2FD',
-        borderColor: '#1E88E5',
+        backgroundColor: '#E0E7FF',
+    },
+    subjectIcon: {
+        backgroundColor: '#6366F1',
     },
     actions: {
         flexDirection: 'row',
@@ -635,61 +788,92 @@ const styles = StyleSheet.create({
     },
     smallButton: {
         margin: 0,
-        padding: 0,
+        minWidth: 40,
+    },
+    separator: {
+        height: 12,
+    },
+    emptyState: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+        padding: 40,
+    },
+    emptyIcon: {
+        backgroundColor: '#E2E8F0',
+        marginBottom: 20,
+    },
+    emptyTitle: {
+        fontSize: 20,
+        fontWeight: '700',
+        color: '#475569',
+        marginBottom: 8,
+        textAlign: 'center',
+    },
+    emptyText: {
+        fontSize: 16,
+        color: '#64748B',
+        textAlign: 'center',
+        marginBottom: 24,
+        lineHeight: 22,
+    },
+    emptyButton: {
+        backgroundColor: '#EC4899',
     },
     fab: {
         position: 'absolute',
         margin: 16,
         right: 0,
         bottom: 0,
-        backgroundColor: '#1E88E5',
+        backgroundColor: '#EC4899',
     },
     modalContainer: {
         margin: 20,
     },
+    modalCard: {
+        borderRadius: 20,
+    },
+    modalGradient: {
+        borderRadius: 20,
+    },
     modalTitle: {
         textAlign: 'center',
-        marginBottom: 16,
-        color: '#1E88E5',
-    },
-    input: {
-        marginBottom: 12,
+        marginBottom: 20,
+        color: '#1E293B',
+        fontSize: 24,
+        fontWeight: '700',
     },
     menuContainer: {
-        marginBottom: 12,
+        marginBottom: 16,
     },
     label: {
         fontSize: 16,
-        fontWeight: 'bold',
+        fontWeight: '600',
         marginBottom: 8,
-        color: '#333',
+        color: '#1E293B',
     },
     menuButton: {
-        borderColor: '#1E88E5',
-        justifyContent: 'flex-start',
+        borderColor: '#E2E8F0',
+        backgroundColor: '#FFFFFF',
+    },
+    menuButtonContent: {
+        justifyContent: 'space-between',
+    },
+    input: {
+        marginBottom: 16,
+        backgroundColor: '#FFFFFF',
     },
     dateSection: {
-        marginBottom: 12,
+        marginBottom: 16,
     },
     dateLabel: {
         fontSize: 16,
-        fontWeight: 'bold',
+        fontWeight: '600',
         marginBottom: 8,
-        color: '#333',
+        color: '#1E293B',
     },
     dateButton: {
-        borderColor: '#1E88E5',
-    },
-    infoSection: {
-        backgroundColor: '#E3F2FD',
-        padding: 12,
-        borderRadius: 8,
-        marginBottom: 12,
-    },
-    infoText: {
-        color: '#1E88E5',
-        fontSize: 14,
-        fontStyle: 'italic',
+        borderColor: '#6366F1',
     },
     modalActions: {
         justifyContent: 'space-between',
