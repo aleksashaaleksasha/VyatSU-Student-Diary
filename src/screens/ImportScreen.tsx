@@ -46,11 +46,29 @@ const ImportScreen: React.FC = () => {
 
         try {
             db.withTransactionSync(() => {
+                // УДАЛЯЕМ старые данные для тех же дат и группы перед добавлением новых
+                const datesToUpdate = [...new Set(scheduleItems.map(item =>
+                    item.date.toISOString().split('T')[0]
+                ))];
+
+                datesToUpdate.forEach(date => {
+                    try {
+                        db.runSync(
+                            'DELETE FROM schedule WHERE date LIKE ? AND student_group = ?',
+                            [`${date}%`, userGroup]
+                        );
+                        console.log(`Deleted old schedule for ${date}, group: ${userGroup}`);
+                    } catch (error) {
+                        console.log('Error deleting old schedule:', error);
+                    }
+                });
+
+                // Добавляем новые данные
                 scheduleItems.forEach(item => {
                     try {
                         db.runSync(
                             `INSERT OR REPLACE INTO schedule (subject, time, teacher, classroom, date, type, student_group) 
-                             VALUES (?, ?, ?, ?, ?, ?, ?);`,
+                         VALUES (?, ?, ?, ?, ?, ?, ?);`,
                             [
                                 item.subject,
                                 item.time,
@@ -118,10 +136,13 @@ const ImportScreen: React.FC = () => {
 
                     Alert.alert(
                         'Успех',
-                        `Импортировано ${importedCount} занятий для группы "${userGroup}"`,
+                        `Обновлено ${importedCount} занятий для группы "${userGroup}"`,
                         [{
                             text: 'OK',
-                            onPress: () => navigation.goBack()
+                            onPress: () => {
+                                // Принудительно обновляем экран расписания
+                                navigation.navigate('Расписание' as never);
+                            }
                         }]
                     );
                 } else {
