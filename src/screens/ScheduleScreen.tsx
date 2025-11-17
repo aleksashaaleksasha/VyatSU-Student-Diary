@@ -13,6 +13,8 @@ import {
     Provider as PaperProvider,
     Divider,
     Menu,
+    IconButton,
+    ActivityIndicator,
 } from 'react-native-paper';
 import { format, isAfter, isToday, isSameDay, addDays, subDays } from 'date-fns';
 import { ru } from 'date-fns/locale';
@@ -20,6 +22,7 @@ import * as SQLite from 'expo-sqlite';
 import { useIsFocused, useNavigation } from '@react-navigation/native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { LinearGradient } from 'expo-linear-gradient';
+import { vkApiService, ScheduleUpdateResult } from '../utils/vkApiService';
 
 const { width } = Dimensions.get('window');
 
@@ -36,7 +39,12 @@ interface ScheduleItem {
     student_group?: string;
 }
 
-const ScheduleScreen = () => {
+interface ScheduleScreenProps {
+    onRefreshPress?: () => void; // ДОБАВЛЕНО: callback для кнопки обновления
+    refreshing?: boolean; // ДОБАВЛЕНО: состояние обновления извне
+}
+
+const ScheduleScreen: React.FC<ScheduleScreenProps> = ({ onRefreshPress, refreshing = false }) => { // ИЗМЕНЕНО: добавлены props
     const [selectedDate, setSelectedDate] = useState(new Date());
     const [showDatePicker, setShowDatePicker] = useState(false);
     const [schedule, setSchedule] = useState<ScheduleItem[]>([]);
@@ -45,13 +53,13 @@ const ScheduleScreen = () => {
     const [contextMenuAnchor, setContextMenuAnchor] = useState({ x: 0, y: 0 });
     const [quickNoteModalVisible, setQuickNoteModalVisible] = useState(false);
     const [quickNote, setQuickNote] = useState({
-        title: '',
         content: '',
         deadlineType: 'next_class' as 'date' | 'next_class' | 'none'
     });
     const [selectedNoteDate, setSelectedNoteDate] = useState(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000));
     const [showNoteDatePicker, setShowNoteDatePicker] = useState(false);
     const [userGroup, setUserGroup] = useState('');
+    const [lastVkUpdate, setLastVkUpdate] = useState<Date | null>(null);
     const fadeAnim = useState(new Animated.Value(0))[0];
 
     const isFocused = useIsFocused();
@@ -61,6 +69,7 @@ const ScheduleScreen = () => {
         initDatabase();
         loadScheduleFromDB();
         loadUserGroup();
+        loadLastVkUpdate();
         Animated.timing(fadeAnim, {
             toValue: 1,
             duration: 500,
@@ -72,6 +81,7 @@ const ScheduleScreen = () => {
         if (isFocused) {
             loadScheduleFromDB();
             loadUserGroup();
+            loadLastVkUpdate();
         }
     }, [isFocused]);
 
@@ -101,6 +111,7 @@ const ScheduleScreen = () => {
                 ...item,
                 date: new Date(item.date)
             }));
+            console.log('Loaded schedule items:', scheduleData.length);
             setSchedule(scheduleData);
         } catch (error) {
             console.log('Error loading schedule:', error);
@@ -115,6 +126,29 @@ const ScheduleScreen = () => {
             }
         } catch (error) {
             console.log('Error loading user group:', error);
+        }
+    };
+
+    const loadLastVkUpdate = () => {
+        try {
+            const result = db.getFirstSync('SELECT value FROM settings WHERE key = "last_vk_update"') as any;
+            if (result) {
+                setLastVkUpdate(new Date(result.value));
+            }
+        } catch (error) {
+            console.log('Error loading last VK update:', error);
+        }
+    };
+
+    // ИЗМЕНЕНО: Упрощенная функция обновления, если кнопка в App.tsx
+    const handleRefresh = () => {
+        if (onRefreshPress) {
+            onRefreshPress(); // Используем callback из App.tsx
+        } else {
+            // Фолбэк для обратной совместимости
+            loadScheduleFromDB();
+            loadUserGroup();
+            loadLastVkUpdate();
         }
     };
 
@@ -160,7 +194,6 @@ const ScheduleScreen = () => {
         if (!selectedScheduleItem) return;
 
         setQuickNote({
-            title: `${selectedScheduleItem.subject} - задание`,
             content: '',
             deadlineType: 'next_class'
         });
@@ -169,7 +202,8 @@ const ScheduleScreen = () => {
     };
 
     const saveQuickNote = () => {
-        if (!selectedScheduleItem || !quickNote.title.trim()) {
+        if (!selectedScheduleItem || !quickNote.content.trim()) {
+            Alert.alert('Ошибка', 'Введите описание заметки');
             return;
         }
 
@@ -178,17 +212,21 @@ const ScheduleScreen = () => {
 
         if (quickNote.deadlineType === 'date') {
             deadline = selectedNoteDate.toISOString();
+            console.log('Using custom date:', deadline);
         } else if (quickNote.deadlineType === 'next_class') {
             const nextClass = getNextClassDate(selectedScheduleItem.subject);
             if (nextClass) {
                 deadline = nextClass.toISOString();
                 nextClassDate = nextClass.toISOString();
+                console.log('Using next class date:', deadline);
+            } else {
+                console.log('No next class found for subject:', selectedScheduleItem.subject);
             }
         }
 
         const note = {
             id: Date.now().toString(),
-            title: quickNote.title.trim(),
+            title: `${selectedScheduleItem.subject} - задание`,
             content: quickNote.content.trim(),
             subject: selectedScheduleItem.subject,
             deadline,
@@ -218,9 +256,11 @@ const ScheduleScreen = () => {
             );
 
             setQuickNoteModalVisible(false);
+            Alert.alert('Успех', 'Заметка создана');
             navigation.navigate('Заметки' as never);
         } catch (error) {
             console.log('Error saving quick note:', error);
+            Alert.alert('Ошибка', 'Не удалось сохранить заметку');
         }
     };
 
@@ -250,6 +290,18 @@ const ScheduleScreen = () => {
 
     const formatDisplayDate = (date: Date) => {
         return format(date, 'd MMMM yyyy', { locale: ru });
+    };
+
+    const formatDisplayDateShort = (date: Date) => {
+        return format(date, 'dd.MM.yyyy', { locale: ru });
+    };
+
+    const showDatePickerModal = () => {
+        setShowNoteDatePicker(true);
+    };
+
+    const hideDatePicker = () => {
+        setShowNoteDatePicker(false);
     };
 
     const renderScheduleItem = ({ item, index }: { item: ScheduleItem; index: number }) => {
@@ -321,12 +373,16 @@ const ScheduleScreen = () => {
                     colors={['#6366F1', '#8B5CF6']}
                     style={styles.headerGradient}
                 >
-                    {userGroup && (
+                    {/* УПРОЩЕННЫЙ header - убрана кнопка обновления */}
+                    <View style={styles.headerTopRow}>
                         <View style={styles.groupContainer}>
-                            <Text style={styles.groupText}>{userGroup}</Text>
+                            {userGroup && (
+                                <Text style={styles.groupText}>{userGroup}</Text>
+                            )}
                         </View>
-                    )}
+                    </View>
 
+                    {/* ИЗМЕНЕНО: Дата и информация об обновлении в одном блоке */}
                     <View style={styles.dateHeader}>
                         <Button
                             icon="chevron-left"
@@ -345,6 +401,12 @@ const ScheduleScreen = () => {
                             <Text style={styles.dateNumber}>
                                 {format(selectedDate, 'd MMMM yyyy', { locale: ru })}
                             </Text>
+                            {/* ИЗМЕНЕНО: Дата обновления под основной датой */}
+                            {lastVkUpdate && (
+                                <Text style={styles.lastUpdateText}>
+                                    Обновлено: {format(lastVkUpdate, 'dd.MM.yyyy HH:mm', { locale: ru })}
+                                </Text>
+                            )}
                         </TouchableOpacity>
 
                         <Button
@@ -398,6 +460,7 @@ const ScheduleScreen = () => {
                         <Text style={styles.sectionTitle}>
                             {format(selectedDate, 'EEEE', { locale: ru }).charAt(0).toUpperCase() + format(selectedDate, 'EEEE', { locale: ru }).slice(1)}
                         </Text>
+                        {/* УБРАНО: индикатор обновления из строки дня недели */}
                     </View>
 
                     {filteredSchedule.length === 0 ? (
@@ -428,6 +491,28 @@ const ScheduleScreen = () => {
                     )}
                 </View>
 
+                {/* ДОБАВЛЕНО: Модальное окно для индикатора обновления */}
+                <Portal>
+                    <Modal
+                        visible={refreshing}
+                        dismissable={false}
+                        contentContainerStyle={styles.loadingModalContainer}
+                    >
+                        <Card style={styles.loadingModalCard}>
+                            <Card.Content style={styles.loadingModalContent}>
+                                <ActivityIndicator size="large" color="#6366F1" />
+                                <Title style={styles.loadingModalTitle}>
+                                    Проверка обновлений...
+                                </Title>
+                                <Text style={styles.loadingModalText}>
+                                    Идет проверка новых расписаний из VK
+                                </Text>
+                            </Card.Content>
+                        </Card>
+                    </Modal>
+                </Portal>
+
+                {/* Остальные Portal компоненты остаются без изменений */}
                 <Portal>
                     <Menu
                         visible={contextMenuVisible}
@@ -471,21 +556,16 @@ const ScheduleScreen = () => {
                         <Card style={styles.modalCard}>
                             <Card.Content>
                                 <Title style={styles.modalTitle}>Быстрая заметка</Title>
-                                <Text style={styles.modalSubtitle}>
-                                    Предмет: {selectedScheduleItem?.subject}
-                                </Text>
+
+                                <View style={styles.subjectDisplay}>
+                                    <Text style={styles.subjectLabel}>Предмет</Text>
+                                    <Chip mode="outlined" style={styles.subjectChipDisplay}>
+                                        {selectedScheduleItem?.subject}
+                                    </Chip>
+                                </View>
 
                                 <TextInput
-                                    label="Заголовок *"
-                                    value={quickNote.title}
-                                    onChangeText={(text) => setQuickNote({...quickNote, title: text})}
-                                    mode="outlined"
-                                    style={styles.input}
-                                    placeholder="Название задания"
-                                />
-
-                                <TextInput
-                                    label="Описание"
+                                    label="Описание *"
                                     value={quickNote.content}
                                     onChangeText={(text) => setQuickNote({...quickNote, content: text})}
                                     mode="outlined"
@@ -499,15 +579,25 @@ const ScheduleScreen = () => {
                                     <Text style={styles.label}>Дедлайн</Text>
                                     <View style={styles.deadlineButtons}>
                                         <Button
+                                            mode={quickNote.deadlineType === 'none' ? "contained" : "outlined"}
+                                            onPress={() => setQuickNote({...quickNote, deadlineType: 'none'})}
+                                            style={styles.deadlineButton}
+                                        >
+                                            Без дедлайна
+                                        </Button>
+                                        <Button
                                             mode={quickNote.deadlineType === 'next_class' ? "contained" : "outlined"}
                                             onPress={() => setQuickNote({...quickNote, deadlineType: 'next_class'})}
                                             style={styles.deadlineButton}
                                         >
-                                            До след. занятия
+                                            До след. пары
                                         </Button>
                                         <Button
                                             mode={quickNote.deadlineType === 'date' ? "contained" : "outlined"}
-                                            onPress={() => setQuickNote({...quickNote, deadlineType: 'date'})}
+                                            onPress={() => {
+                                                setQuickNote({...quickNote, deadlineType: 'date'});
+                                                setTimeout(() => setShowNoteDatePicker(true), 100);
+                                            }}
                                             style={styles.deadlineButton}
                                         >
                                             Конкретная дата
@@ -516,27 +606,18 @@ const ScheduleScreen = () => {
                                 </View>
 
                                 {quickNote.deadlineType === 'date' && (
-                                    <View style={styles.dateInputSection}>
+                                    <View style={styles.dateSection}>
                                         <Text style={styles.label}>Дата выполнения</Text>
-                                        <Button
-                                            mode="outlined"
-                                            onPress={() => setShowNoteDatePicker(true)}
-                                            style={styles.customDateButton}
-                                            icon="calendar"
-                                        >
-                                            {formatDisplayDate(selectedNoteDate)}
-                                        </Button>
+                                        <View style={styles.dateInputRow}>
+                                            <TextInput
+                                                value={formatDisplayDateShort(selectedNoteDate)}
+                                                mode="outlined"
+                                                style={styles.dateInput}
+                                                editable={false}
+                                                right={<TextInput.Icon icon="calendar" onPress={() => setShowNoteDatePicker(true)} />}
+                                            />
+                                        </View>
                                     </View>
-                                )}
-
-                                {showNoteDatePicker && (
-                                    <DateTimePicker
-                                        value={selectedNoteDate}
-                                        mode="date"
-                                        display="default"
-                                        onChange={onNoteDateChange}
-                                        minimumDate={new Date()}
-                                    />
                                 )}
                             </Card.Content>
                             <Card.Actions style={styles.modalActions}>
@@ -551,11 +632,48 @@ const ScheduleScreen = () => {
                                     mode="contained"
                                     onPress={saveQuickNote}
                                     style={styles.modalButton}
-                                    disabled={!quickNote.title.trim()}
+                                    disabled={!quickNote.content.trim()}
                                 >
-                                    Сохранить
+                                    Добавить
                                 </Button>
                             </Card.Actions>
+                        </Card>
+                    </Modal>
+                </Portal>
+
+                <Portal>
+                    <Modal
+                        visible={showNoteDatePicker}
+                        onDismiss={() => setShowNoteDatePicker(false)}
+                        contentContainerStyle={styles.datePickerModalContainer}
+                    >
+                        <Card style={styles.datePickerCard}>
+                            <Card.Content>
+                                <Title style={styles.datePickerTitle}>Выберите дату выполнения</Title>
+                                <DateTimePicker
+                                    value={selectedNoteDate}
+                                    mode="date"
+                                    display="spinner"
+                                    onChange={(event, date) => {
+                                        if (date) {
+                                            setSelectedNoteDate(date);
+                                            setShowNoteDatePicker(false);
+                                        }
+                                    }}
+                                    locale="ru"
+                                    style={styles.datePicker}
+                                    minimumDate={new Date()}
+                                />
+                                <View style={styles.datePickerActions}>
+                                    <Button
+                                        mode="contained"
+                                        onPress={() => setShowNoteDatePicker(false)}
+                                        style={styles.datePickerButton}
+                                    >
+                                        Готово
+                                    </Button>
+                                </View>
+                            </Card.Content>
                         </Card>
                     </Modal>
                 </Portal>
@@ -571,14 +689,21 @@ const styles = StyleSheet.create({
     },
     headerGradient: {
         paddingTop: 0,
-        paddingBottom: 14,
+        paddingBottom: 12,
         borderBottomLeftRadius: 20,
         borderBottomRightRadius: 20,
     },
+    headerTopRow: {
+        flexDirection: 'row',
+        justifyContent: 'center',
+        alignItems: 'center',
+        paddingHorizontal: 16,
+        paddingTop: 2,
+        paddingBottom: 2,
+        position: 'relative',
+    },
     groupContainer: {
         alignItems: 'center',
-        marginBottom: 2,
-        paddingHorizontal: 16,
     },
     groupText: {
         color: '#FFFFFF',
@@ -591,6 +716,7 @@ const styles = StyleSheet.create({
         justifyContent: 'space-between',
         alignItems: 'center',
         paddingHorizontal: 16,
+
     },
     navButton: {
         margin: 0,
@@ -607,15 +733,22 @@ const styles = StyleSheet.create({
         fontWeight: '700',
         marginTop: 2,
     },
+    // ИЗМЕНЕНО: Стиль для даты обновления под основной датой
+    lastUpdateText: {
+        color: '#FFFFFF',
+        fontSize: 12,
+        opacity: 0.8,
+        marginTop: 4,
+    },
     content: {
         flex: 1,
         padding: 12,
         backgroundColor: '#F8FAFC',
-        paddingBottom: 90, // ДОБАВЬТЕ ЭТУ СТРОКУ - отступ снизу для панели навигации
+        paddingBottom: 90,
     },
     scheduleHeader: {
         flexDirection: 'row',
-        justifyContent: 'center',
+        justifyContent: 'space-between',
         alignItems: 'center',
         marginBottom: 16,
         position: 'relative',
@@ -625,7 +758,9 @@ const styles = StyleSheet.create({
         fontWeight: '700',
         color: '#1E293B',
         textAlign: 'center',
+        flex: 1,
     },
+    // УБРАНО: стили для индикатора обновления в строке
     scheduleList: {
         paddingBottom: 20,
     },
@@ -696,7 +831,7 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         alignItems: 'center',
         padding: 40,
-        paddingBottom: 90, // ДОБАВЬТЕ ЭТУ СТРОКУ для пустого состояния
+        paddingBottom: 90,
     },
     emptyIcon: {
         fontSize: 48,
@@ -718,6 +853,32 @@ const styles = StyleSheet.create({
     },
     emptyButton: {
         borderColor: '#6366F1',
+        marginBottom: 8,
+    },
+    // ДОБАВЛЕНО: Стили для модального окна загрузки
+    loadingModalContainer: {
+        margin: 40,
+    },
+    loadingModalCard: {
+        borderRadius: 20,
+        backgroundColor: '#FFFFFF',
+    },
+    loadingModalContent: {
+        alignItems: 'center',
+        padding: 24,
+    },
+    loadingModalTitle: {
+        fontSize: 18,
+        fontWeight: '600',
+        color: '#1E293B',
+        marginTop: 16,
+        textAlign: 'center',
+    },
+    loadingModalText: {
+        fontSize: 14,
+        color: '#64748B',
+        textAlign: 'center',
+        marginTop: 8,
     },
     menuContent: {
         backgroundColor: '#FFFFFF',
@@ -736,16 +897,23 @@ const styles = StyleSheet.create({
     },
     modalTitle: {
         textAlign: 'center',
-        marginBottom: 4,
+        marginBottom: 20,
         color: '#1E293B',
-        fontSize: 20,
+        fontSize: 24,
         fontWeight: '700',
     },
-    modalSubtitle: {
-        textAlign: 'center',
-        marginBottom: 20,
-        color: '#64748B',
+    subjectDisplay: {
+        marginBottom: 16,
+    },
+    subjectLabel: {
         fontSize: 14,
+        fontWeight: '600',
+        marginBottom: 8,
+        color: '#1E293B',
+    },
+    subjectChipDisplay: {
+        alignSelf: 'flex-start',
+        backgroundColor: '#E0E7FF',
     },
     input: {
         marginBottom: 16,
@@ -767,11 +935,17 @@ const styles = StyleSheet.create({
     deadlineButton: {
         flex: 1,
     },
-    dateInputSection: {
+    dateSection: {
         marginBottom: 16,
     },
-    customDateButton: {
-        borderColor: '#6366F1',
+    dateInputRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+    },
+    dateInput: {
+        flex: 1,
+        backgroundColor: '#FFFFFF',
     },
     modalActions: {
         justifyContent: 'space-between',
@@ -810,6 +984,38 @@ const styles = StyleSheet.create({
         height: 200,
         backgroundColor: '#F8FAFC',
         borderRadius: 12,
+    },
+    datePickerModalContainer: {
+        margin: 20,
+        zIndex: 9999,
+        elevation: 10,
+    },
+    datePickerCard: {
+        borderRadius: 20,
+        backgroundColor: '#FFFFFF',
+        elevation: 12,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 6 },
+        shadowOpacity: 0.3,
+        shadowRadius: 12,
+    },
+    datePickerTitle: {
+        textAlign: 'center',
+        marginBottom: 16,
+        color: '#1E293B',
+        fontSize: 20,
+        fontWeight: '700',
+    },
+    datePicker: {
+        height: 200,
+        marginBottom: 16,
+    },
+    datePickerActions: {
+        flexDirection: 'row',
+        justifyContent: 'center',
+    },
+    datePickerButton: {
+        minWidth: 120,
     },
 });
 

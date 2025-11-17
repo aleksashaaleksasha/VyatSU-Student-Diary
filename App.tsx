@@ -1,28 +1,31 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { NavigationContainer, DefaultTheme as NavigationDefaultTheme } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createStackNavigator } from '@react-navigation/stack';
-import { Provider as PaperProvider, MD3LightTheme, configureFonts } from 'react-native-paper';
+import { Provider as PaperProvider, MD3LightTheme, configureFonts, Appbar } from 'react-native-paper';
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
-import { View } from 'react-native';
-import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context'; // ДОБАВЬТЕ ЭТОТ ИМПОРТ
+import { View, Alert, Text, TouchableOpacity } from 'react-native';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import ScheduleScreen from './src/screens/ScheduleScreen';
 import NotesScreen from './src/screens/NotesScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
 import ImportScreen from './src/screens/ImportScreen';
 import GroupSelectScreen from './src/screens/GroupSelectScreen';
 import VkScheduleScreen from './src/screens/VkScheduleScreen';
+import { vkApiService, ScheduleUpdateResult } from './src/utils/vkApiService';
+import * as SQLite from 'expo-sqlite';
 
+const db = SQLite.openDatabaseSync('student_diary.db');
 const Tab = createBottomTabNavigator();
 const Stack = createStackNavigator();
 
 // Кастомная цветовая схема
 const colorScheme = {
-    primary: '#6366F1', // Индиго
+    primary: '#6366F1',
     primaryLight: '#A5B4FC',
     primaryDark: '#4338CA',
-    secondary: '#EC4899', // Розовый
+    secondary: '#EC4899',
     background: '#F8FAFC',
     surface: '#FFFFFF',
     error: '#EF4444',
@@ -170,7 +173,6 @@ const theme = {
     roundness: 12,
 };
 
-// Кастомная тема для навигации
 const navigationTheme = {
     ...NavigationDefaultTheme,
     colors: {
@@ -218,7 +220,108 @@ const SettingsStack = () => (
     </Stack.Navigator>
 );
 
+// Кастомный хедер для экрана расписания с кнопкой обновления
+// ЗАМЕНИТЕ компонент ScheduleHeader в App.tsx на этот:
+const ScheduleHeader = ({ onRefresh, refreshing }: { onRefresh: () => void; refreshing: boolean }) => {
+    return (
+        <SafeAreaView style={{ backgroundColor: colorScheme.primary }}>
+            <View style={{
+                backgroundColor: colorScheme.primary,
+                height: 46,
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'center',
+                paddingHorizontal: 16,
+                paddingTop: 0, // УБЕРИТЕ лишние отступы
+            }}>
+                {/* Заголовок по центру */}
+                <Text style={{
+                    color: '#FFFFFF',
+                    fontSize: 20,
+                    fontWeight: '700',
+                    flex: 1,
+                    textAlign: 'center',
+                    marginTop: 0, // УБЕРИТЕ margin
+                }}>
+                    Расписание
+                </Text>
+
+                {/* Кнопка обновления справа */}
+                <TouchableOpacity
+                    onPress={onRefresh}
+                    disabled={refreshing}
+                    style={{
+                        padding: 8,
+                        position: 'absolute',
+                        right: 16,
+                        top: 8, // ДОБАВЬТЕ top для правильного позиционирования
+                    }}
+                >
+                    <Ionicons
+                        name="refresh"
+                        size={24}
+                        color="#FFFFFF"
+                    />
+                </TouchableOpacity>
+            </View>
+        </SafeAreaView>
+    );
+};
+
 export default function App() {
+    const [refreshingSchedule, setRefreshingSchedule] = useState(false);
+
+    // Функция для проверки обновлений из VK
+    const checkVkUpdates = async () => {
+        try {
+            // Загружаем группу пользователя
+            const userGroupResult = db.getFirstSync('SELECT value FROM settings WHERE key = "user_group"') as any;
+            const userGroup = userGroupResult?.value;
+
+            if (!userGroup) {
+                Alert.alert('Ошибка', 'Сначала выберите вашу группу в настройках');
+                return;
+            }
+
+            setRefreshingSchedule(true);
+
+            console.log('🔄 Checking for VK updates from App header...');
+
+            const result = await vkApiService.checkForScheduleUpdates(userGroup);
+
+            // Сохраняем историю обновлений
+            if (result.success) {
+                db.runSync(
+                    `INSERT INTO update_history (timestamp, new_items_count, success, error_message) 
+                     VALUES (?, ?, ?, ?)`,
+                    [new Date().toISOString(), result.newScheduleCount, result.success ? 1 : 0, result.error || '']
+                );
+
+                // Сохраняем дату последнего обновления
+                db.runSync(
+                    `INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)`,
+                    ['last_vk_update', result.lastUpdate.toISOString()]
+                );
+
+                if (result.newScheduleCount > 0) {
+                    Alert.alert(
+                        'Успех',
+                        `Обновлено ${result.newScheduleCount} занятий для группы "${userGroup}"`
+                    );
+                } else {
+                    Alert.alert('Информация', 'Новых расписаний не найдено');
+                }
+            } else {
+                Alert.alert('Ошибка', result.error || 'Не удалось проверить обновления');
+            }
+        } catch (error) {
+            console.error('VK update check error:', error);
+            Alert.alert('Ошибка', 'Произошла ошибка при проверке обновлений');
+        } finally {
+            setRefreshingSchedule(false);
+        }
+    };
+
     return (
         <SafeAreaProvider>
             <PaperProvider theme={theme}>
@@ -279,7 +382,12 @@ export default function App() {
                         >
                             <Tab.Screen
                                 name="Расписание"
-                                component={ScheduleScreen}
+                                children={() => (
+                                    <ScheduleScreen
+                                        onRefreshPress={checkVkUpdates}
+                                        refreshing={refreshingSchedule}
+                                    />
+                                )}
                                 options={{
                                     title: 'Расписание',
                                     headerShown: true,
@@ -291,8 +399,21 @@ export default function App() {
                                     headerTintColor: '#FFFFFF',
                                     headerTitleStyle: {
                                         fontWeight: '700',
-                                        fontSize: 24,
+                                        fontSize: 20,
                                     },
+                                    headerRight: () => (
+                                        <TouchableOpacity
+                                            onPress={checkVkUpdates}
+                                            disabled={refreshingSchedule}
+                                            style={{ padding: 8, marginRight: 8 }}
+                                        >
+                                            <Ionicons
+                                                name="refresh"
+                                                size={24}
+                                                color="#FFFFFF"
+                                            />
+                                        </TouchableOpacity>
+                                    ),
                                 }}
                             />
                             <Tab.Screen
@@ -300,7 +421,7 @@ export default function App() {
                                 component={NotesScreen}
                                 options={{
                                     title: 'Заметки',
-                                    headerShown: true,
+                                    headerShown: false,
                                 }}
                             />
                             <Tab.Screen

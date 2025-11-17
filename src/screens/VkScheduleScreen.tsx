@@ -1,4 +1,3 @@
-// VkScheduleScreen.tsx - исправленная версия
 import React, { useState, useEffect } from 'react';
 import { View, StyleSheet, ScrollView, Alert, Linking } from 'react-native';
 import { Card, Title, Paragraph, Button, List, ActivityIndicator, Chip, Switch } from 'react-native-paper';
@@ -16,27 +15,54 @@ const VkScheduleScreen: React.FC = () => {
     const [updateHistory, setUpdateHistory] = useState<any[]>([]);
     const isFocused = useIsFocused();
 
+    // Инициализация базы данных
+    const initDatabase = () => {
+        try {
+            db.execSync(`
+                CREATE TABLE IF NOT EXISTS update_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT NOT NULL,
+                    new_items_count INTEGER NOT NULL,
+                    success INTEGER NOT NULL,
+                    error_message TEXT
+                );
+                
+                CREATE TABLE IF NOT EXISTS settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT
+                );
+            `);
+            console.log('Database tables checked/created');
+        } catch (error) {
+            console.log('Error creating tables:', error);
+        }
+    };
+
     useEffect(() => {
         if (isFocused) {
+            console.log('VkScheduleScreen focused, initializing...');
+            initDatabase();
             loadUserGroup();
             loadLastUpdate();
             loadUpdateHistory();
-
-            // Автоматическая проверка при заходе на экран
-            if (autoUpdate) {
-                checkForUpdates();
-            }
         }
     }, [isFocused]);
 
     const loadUserGroup = () => {
         try {
             const result = db.getFirstSync('SELECT value FROM settings WHERE key = "user_group"') as any;
-            if (result) {
+            console.log('Loaded user group from DB:', result);
+            
+            if (result && result.value) {
                 setUserGroup(result.value);
+                console.log('User group set to:', result.value);
+            } else {
+                console.log('No user group found in settings');
+                setUserGroup('');
             }
         } catch (error) {
             console.log('Error loading user group:', error);
+            setUserGroup('');
         }
     };
 
@@ -45,6 +71,9 @@ const VkScheduleScreen: React.FC = () => {
             const result = db.getFirstSync('SELECT value FROM settings WHERE key = "last_vk_update"') as any;
             if (result) {
                 setLastUpdate(new Date(result.value));
+                console.log('Last update loaded:', result.value);
+            } else {
+                console.log('No last update found');
             }
         } catch (error) {
             console.log('Error loading last update:', error);
@@ -58,6 +87,7 @@ const VkScheduleScreen: React.FC = () => {
                 ['last_vk_update', date.toISOString()]
             );
             setLastUpdate(date);
+            console.log('Last update saved:', date.toISOString());
         } catch (error) {
             console.log('Error saving last update:', error);
         }
@@ -68,6 +98,7 @@ const VkScheduleScreen: React.FC = () => {
             const results = db.getAllSync(
                 'SELECT * FROM update_history ORDER BY timestamp DESC LIMIT 10;'
             ) as any[];
+            console.log('Loaded update history:', results.length, 'items');
             setUpdateHistory(results);
         } catch (error) {
             console.log('Error loading update history:', error);
@@ -81,6 +112,7 @@ const VkScheduleScreen: React.FC = () => {
                  VALUES (?, ?, ?, ?)`,
                 [new Date().toISOString(), result.newScheduleCount, result.success ? 1 : 0, result.error || '']
             );
+            console.log('Update history saved:', result.newScheduleCount, 'items');
             loadUpdateHistory();
         } catch (error) {
             console.log('Error saving update history:', error);
@@ -88,15 +120,21 @@ const VkScheduleScreen: React.FC = () => {
     };
 
     const checkForUpdates = async () => {
-        if (!userGroup) {
+        console.log('Checking for updates, userGroup:', userGroup);
+        
+        // Детальная проверка состояния
+        if (!userGroup || userGroup === '' || userGroup === null || userGroup === undefined) {
+            console.log('User group is empty, showing alert');
             Alert.alert('Ошибка', 'Сначала выберите вашу группу в настройках');
             return;
         }
 
+        console.log('Starting update check for group:', userGroup);
         setChecking(true);
 
         try {
             const result = await vkApiService.checkForScheduleUpdates(userGroup);
+            console.log('Update check result:', result);
 
             saveUpdateHistory(result);
 
@@ -114,15 +152,17 @@ const VkScheduleScreen: React.FC = () => {
                 Alert.alert('Ошибка', result.error || 'Не удалось проверить обновления');
             }
         } catch (error) {
-            Alert.alert('Ошибка', 'Произошла ошибка при проверке обновлений');
             console.error('Update check error:', error);
+            Alert.alert('Ошибка', 'Произошла ошибка при проверке обновлений');
         } finally {
             setChecking(false);
         }
     };
 
     const forceCheckUpdates = async () => {
-        if (!userGroup) {
+        console.log('Force checking updates, userGroup:', userGroup);
+        
+        if (!userGroup || userGroup === '') {
             Alert.alert('Ошибка', 'Сначала выберите вашу группу в настройках');
             return;
         }
@@ -148,16 +188,17 @@ const VkScheduleScreen: React.FC = () => {
                 Alert.alert('Ошибка', result.error || 'Не удалось проверить обновления');
             }
         } catch (error) {
-            Alert.alert('Ошибка', 'Произошла ошибка при проверке обновлений');
             console.error('Force update check error:', error);
+            Alert.alert('Ошибка', 'Произошла ошибка при проверке обновлений');
         } finally {
             setChecking(false);
         }
     };
 
-    // НОВАЯ ФУНКЦИЯ: Загрузка последних 3 расписаний
     const loadLastThreeSchedules = async () => {
-        if (!userGroup) {
+        console.log('Loading last 3 schedules, userGroup:', userGroup);
+        
+        if (!userGroup || userGroup === '') {
             Alert.alert('Ошибка', 'Сначала выберите вашу группу в настройках');
             return;
         }
@@ -170,15 +211,14 @@ const VkScheduleScreen: React.FC = () => {
             let processedFiles = 0;
             let scheduleCount = 0;
 
-            // Сортируем посты по дате (новые первыми)
             const sortedPosts = posts.sort((a, b) => b.date - a.date);
 
             for (const post of sortedPosts) {
-                if (scheduleCount >= 3) break; // Ограничиваем 3 расписаниями
+                if (scheduleCount >= 3) break;
 
                 if (vkApiService.isSchedulePost(post)) {
                     scheduleCount++;
-                    console.log(`🎯 Processing schedule ${scheduleCount}: post ${post.id}`);
+                    console.log(`Processing schedule ${scheduleCount}: post ${post.id}`);
 
                     const excelAttachments = post.attachments?.filter(att =>
                         att.type === 'doc' && att.doc?.ext === 'xlsx'
@@ -187,22 +227,19 @@ const VkScheduleScreen: React.FC = () => {
                     for (const attachment of excelAttachments) {
                         if (attachment.doc) {
                             try {
-                                console.log(`📥 Processing recent file: ${attachment.doc.title}`);
+                                console.log(`Processing recent file: ${attachment.doc.title}`);
                                 const arrayBuffer = await vkApiService.downloadScheduleFile(attachment.doc);
                                 const count = await vkApiService.processScheduleFile(arrayBuffer, userGroup);
                                 totalImported += count;
                                 processedFiles++;
-
-                                console.log(`✅ Processed: ${attachment.doc.title}, imported ${count} items`);
                             } catch (error) {
-                                console.error(`❌ Error processing attachment:`, error);
+                                console.error(`Error processing attachment:`, error);
                             }
                         }
                     }
                 }
             }
 
-            // Сохраняем в историю
             const result: ScheduleUpdateResult = {
                 success: true,
                 newScheduleCount: totalImported,
@@ -219,16 +256,17 @@ const VkScheduleScreen: React.FC = () => {
             );
 
         } catch (error) {
-            Alert.alert('Ошибка', 'Произошла ошибка при загрузке последних расписаний');
             console.error('Recent schedules load error:', error);
+            Alert.alert('Ошибка', 'Произошла ошибка при загрузке последних расписаний');
         } finally {
             setChecking(false);
         }
     };
 
-    // НОВАЯ ФУНКЦИЯ: Загрузка всего семестра
     const loadFullSemesterSchedule = async () => {
-        if (!userGroup) {
+        console.log('Loading full semester, userGroup:', userGroup);
+        
+        if (!userGroup || userGroup === '') {
             Alert.alert('Ошибка', 'Сначала выберите вашу группу в настройках');
             return;
         }
@@ -236,14 +274,11 @@ const VkScheduleScreen: React.FC = () => {
         setChecking(true);
 
         try {
-            // Получаем больше постов для поиска расписаний за весь семестр
-            const posts = await vkApiService.getGroupPosts(100); // 100 постов
+            const posts = await vkApiService.getGroupPosts(100);
             let totalImported = 0;
             let processedFiles = 0;
 
-            // Ищем все Excel файлы с расписаниями
             const schedulePosts = posts.filter(post => vkApiService.isSchedulePost(post));
-
             console.log(`Found ${schedulePosts.length} schedule posts`);
 
             for (const post of schedulePosts) {
@@ -254,21 +289,18 @@ const VkScheduleScreen: React.FC = () => {
                 for (const attachment of excelAttachments) {
                     if (attachment.doc) {
                         try {
-                            console.log(`📥 Processing semester file: ${attachment.doc.title}`);
+                            console.log(`Processing semester file: ${attachment.doc.title}`);
                             const arrayBuffer = await vkApiService.downloadScheduleFile(attachment.doc);
                             const count = await vkApiService.processScheduleFile(arrayBuffer, userGroup);
                             totalImported += count;
                             processedFiles++;
-
-                            console.log(`✅ Processed: ${attachment.doc.title}, imported ${count} items`);
                         } catch (error) {
-                            console.error(`❌ Error processing attachment:`, error);
+                            console.error(`Error processing attachment:`, error);
                         }
                     }
                 }
             }
 
-            // Сохраняем в историю
             const result: ScheduleUpdateResult = {
                 success: true,
                 newScheduleCount: totalImported,
@@ -285,8 +317,8 @@ const VkScheduleScreen: React.FC = () => {
             );
 
         } catch (error) {
-            Alert.alert('Ошибка', 'Произошла ошибка при загрузке расписания семестра');
             console.error('Semester load error:', error);
+            Alert.alert('Ошибка', 'Произошла ошибка при загрузке расписания семестра');
         } finally {
             setChecking(false);
         }
@@ -354,7 +386,6 @@ const VkScheduleScreen: React.FC = () => {
                                 Принудительная проверка
                             </Button>
 
-                            {/* НОВЫЕ КНОПКИ */}
                             <Button
                                 mode="outlined"
                                 icon="calendar-month"

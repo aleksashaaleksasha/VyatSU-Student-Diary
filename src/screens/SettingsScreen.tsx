@@ -12,9 +12,10 @@ const SettingsScreen = () => {
     const [clearDialogVisible, setClearDialogVisible] = useState(false);
     const navigation = useNavigation();
 
-    useEffect(() => {
-        loadUserGroup();
-    }, []);
+   useEffect(() => {
+    initDatabase(); // ДОБАВЬТЕ ЭТУ СТРОКУ
+    loadUserGroup();
+}, []);
 
     const loadUserGroup = () => {
         try {
@@ -248,6 +249,19 @@ const SettingsScreen = () => {
     );
 };
 
+const initDatabase = () => {
+    try {
+        db.execSync(`
+            CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            );
+        `);
+    } catch (error) {
+        console.log('Error creating settings table:', error);
+    }
+};
+
 const styles = StyleSheet.create({
     container: {
         flex: 1,
@@ -270,5 +284,7 @@ const styles = StyleSheet.create({
         marginBottom: 12,
     },
 });
+
+
 
 export default SettingsScreen;

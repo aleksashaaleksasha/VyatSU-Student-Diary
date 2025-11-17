@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, FlatList, Animated } from 'react-native';
+import { View, StyleSheet, FlatList, Animated, Alert, TouchableOpacity } from 'react-native';
 import {
     Card,
     Title,
@@ -15,12 +15,14 @@ import {
     Divider,
     Avatar,
     SegmentedButtons,
+    IconButton,
 } from 'react-native-paper';
 import { format, isAfter, isToday, isTomorrow } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import * as SQLite from 'expo-sqlite';
 import { LinearGradient } from 'expo-linear-gradient';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 const db = SQLite.openDatabaseSync('student_diary.db');
 
@@ -56,6 +58,7 @@ const NotesScreen = () => {
     });
 
     useEffect(() => {
+        initNotesDatabase();
         loadNotes();
         loadScheduleSubjects();
         Animated.timing(fadeAnim, {
@@ -65,13 +68,37 @@ const NotesScreen = () => {
         }).start();
     }, []);
 
+    const initNotesDatabase = () => {
+        try {
+            db.execSync(`
+                CREATE TABLE IF NOT EXISTS notes (
+                                                     id TEXT PRIMARY KEY,
+                                                     title TEXT NOT NULL,
+                                                     content TEXT NOT NULL,
+                                                     subject TEXT NOT NULL,
+                                                     deadline TEXT,
+                                                     deadlineType TEXT NOT NULL,
+                                                     createdAt TEXT NOT NULL,
+                                                     important INTEGER DEFAULT 0,
+                                                     completed INTEGER DEFAULT 0,
+                                                     nextClassDate TEXT
+                );
+            `);
+            console.log('Notes table checked/created');
+        } catch (error) {
+            console.log('Error creating notes table:', error);
+        }
+    };
+
     const loadNotes = () => {
         try {
             const results = db.getAllSync('SELECT * FROM notes ORDER BY createdAt DESC;') as any[];
             const loadedNotes = results.map(item => ({
                 ...item,
-                completed: item.completed === 1
+                completed: item.completed === 1,
+                important: item.important === 1
             }));
+            console.log('Loaded notes:', loadedNotes.length);
             setNotes(loadedNotes);
         } catch (error) {
             console.log('Error loading notes:', error);
@@ -83,6 +110,7 @@ const NotesScreen = () => {
             const results = db.getAllSync('SELECT DISTINCT subject FROM schedule WHERE date >= date("now") ORDER BY subject;') as any[];
             const subjects = results.map(item => item.subject).filter(Boolean);
             setScheduleSubjects(subjects);
+            console.log('Loaded subjects:', subjects);
         } catch (error) {
             console.log('Error loading schedule subjects:', error);
         }
@@ -91,7 +119,7 @@ const NotesScreen = () => {
     const getNextClassDate = (subject: string): Date | null => {
         try {
             const result = db.getFirstSync(
-                'SELECT date FROM schedule WHERE subject = ? AND date >= date("now") AND type != "Лекция" ORDER BY date LIMIT 1;',
+                'SELECT date FROM schedule WHERE subject = ? AND date >= date("now") ORDER BY date LIMIT 1;',
                 [subject]
             ) as any;
 
@@ -105,8 +133,13 @@ const NotesScreen = () => {
         }
     };
 
-    const showModal = () => setVisible(true);
+    const showModal = () => {
+        console.log('Opening modal...');
+        setVisible(true);
+    };
+
     const hideModal = () => {
+        console.log('Closing modal...');
         setVisible(false);
         setNewNote({
             title: '',
@@ -115,10 +148,23 @@ const NotesScreen = () => {
             deadlineType: 'none'
         });
         setSelectedDate(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000));
+        setShowDatePicker(false);
     };
 
     const addNote = () => {
-        if (!newNote.title.trim() || !newNote.content.trim() || !newNote.subject.trim()) {
+        console.log('Add note clicked');
+        console.log('Current note data:', newNote);
+
+        if (!newNote.title.trim()) {
+            Alert.alert('Ошибка', 'Введите заголовок заметки');
+            return;
+        }
+        if (!newNote.content.trim()) {
+            Alert.alert('Ошибка', 'Введите описание заметки');
+            return;
+        }
+        if (!newNote.subject.trim()) {
+            Alert.alert('Ошибка', 'Введите предмет');
             return;
         }
 
@@ -127,11 +173,15 @@ const NotesScreen = () => {
 
         if (newNote.deadlineType === 'date') {
             deadline = selectedDate.toISOString();
+            console.log('Using custom date:', deadline);
         } else if (newNote.deadlineType === 'next_class') {
             const nextClass = getNextClassDate(newNote.subject);
             if (nextClass) {
                 deadline = nextClass.toISOString();
                 nextClassDate = nextClass.toISOString();
+                console.log('Using next class date:', deadline);
+            } else {
+                console.log('No next class found for subject:', newNote.subject);
             }
         }
 
@@ -147,6 +197,8 @@ const NotesScreen = () => {
             completed: false,
             nextClassDate
         };
+
+        console.log('Saving note to database:', note);
 
         try {
             db.runSync(
@@ -166,10 +218,13 @@ const NotesScreen = () => {
                 ]
             );
 
+            console.log('Note saved successfully');
             setNotes(prevNotes => [note, ...prevNotes]);
             hideModal();
+            Alert.alert('Успех', 'Заметка создана');
         } catch (error) {
             console.log('Error saving note:', error);
+            Alert.alert('Ошибка', 'Не удалось сохранить заметку: ' + error);
         }
     };
 
@@ -204,12 +259,29 @@ const NotesScreen = () => {
     };
 
     const deleteNote = (id: string) => {
-        try {
-            db.runSync('DELETE FROM notes WHERE id = ?;', [id]);
-            setNotes(prevNotes => prevNotes.filter(note => note.id !== id));
-        } catch (error) {
-            console.log('Error deleting note:', error);
-        }
+        Alert.alert(
+            'Удаление заметки',
+            'Вы уверены, что хотите удалить эту заметку?',
+            [
+                {
+                    text: 'Отмена',
+                    style: 'cancel',
+                },
+                {
+                    text: 'Удалить',
+                    style: 'destructive',
+                    onPress: () => {
+                        try {
+                            db.runSync('DELETE FROM notes WHERE id = ?;', [id]);
+                            setNotes(prevNotes => prevNotes.filter(note => note.id !== id));
+                        } catch (error) {
+                            console.log('Error deleting note:', error);
+                            Alert.alert('Ошибка', 'Не удалось удалить заметку');
+                        }
+                    },
+                },
+            ]
+        );
     };
 
     const getDeadlineColor = (deadline: string | undefined) => {
@@ -225,7 +297,12 @@ const NotesScreen = () => {
     };
 
     const getDeadlineText = (note: Note) => {
-        if (!note.deadline) return 'Без дедлайна';
+        if (!note.deadline) {
+            if (note.deadlineType === 'next_class') {
+                return 'До след. пары';
+            }
+            return 'Без дедлайна';
+        }
 
         const deadlineDate = new Date(note.deadline);
         const today = new Date();
@@ -235,7 +312,7 @@ const NotesScreen = () => {
         if (isAfter(today, deadlineDate)) return 'Просрочено';
 
         if (note.deadlineType === 'next_class') {
-            return `До занятия: ${format(deadlineDate, 'd MMM', { locale: ru })}`;
+            return `До пары: ${format(deadlineDate, 'd MMM', { locale: ru })}`;
         }
 
         return format(deadlineDate, 'd MMM', { locale: ru });
@@ -268,20 +345,26 @@ const NotesScreen = () => {
         return format(date, 'd MMMM yyyy', { locale: ru });
     };
 
-    const getDeadlineTypeText = (type: string) => {
-        switch (type) {
-            case 'date': return 'Конкретная дата';
-            case 'next_class': return 'До следующего занятия';
-            case 'none': return 'Без дедлайна';
-            default: return type;
-        }
+    const formatDisplayDateShort = (date: Date) => {
+        return format(date, 'dd.MM.yyyy', { locale: ru });
     };
 
     const onDateChange = (event: any, date?: Date) => {
-        setShowDatePicker(false);
         if (date) {
             setSelectedDate(date);
         }
+    };
+
+    const showDatePickerModal = () => {
+        setShowDatePicker(true);
+    };
+
+    const hideDatePicker = () => {
+        setShowDatePicker(false);
+    };
+
+    const confirmDate = () => {
+        setShowDatePicker(false);
     };
 
     const renderNote = ({ item, index }: { item: Note; index: number }) => (
@@ -344,44 +427,78 @@ const NotesScreen = () => {
 
                     {/* Описание заметки */}
                     <Text
-                        style={[styles.noteContent, item.completed && styles.completedText]} // noteContent вместо content
+                        style={[styles.noteContent, item.completed && styles.completedText]}
                         numberOfLines={3}
                     >
                         {item.content}
                     </Text>
 
-                    {/* Нижняя часть с действиями */}
-                    <View style={styles.noteFooter}>
-                        <View style={styles.actions}>
-                            <Button
-                                mode={item.important ? "contained" : "outlined"}
-                                compact
-                                onPress={() => toggleImportant(item.id)}
-                                style={styles.actionButton}
-                                icon="star"
-                            >
-                                {''}
-                            </Button>
-                            <Button
-                                mode={item.completed ? "contained" : "outlined"}
-                                compact
-                                onPress={() => toggleCompleted(item.id)}
-                                style={styles.actionButton}
-                                icon={item.completed ? "check-circle" : "circle-outline"}
-                            >
-                                {''}
-                            </Button>
-                            <Button
-                                mode="outlined"
-                                compact
-                                onPress={() => deleteNote(item.id)}
-                                style={styles.actionButton}
-                                icon="delete"
-                                textColor="#EF4444"
-                            >
-                                {''}
-                            </Button>
-                        </View>
+                    {/* Нижняя часть с красивыми кнопками действий */}
+                    <View style={styles.actionsContainer}>
+                        {/* Кнопка избранного - только иконка */}
+                        <TouchableOpacity
+                            style={[
+                                styles.actionButton,
+                                styles.favoriteButton,
+                                item.important && styles.favoriteButtonActive
+                            ]}
+                            onPress={() => toggleImportant(item.id)}
+                        >
+                            {item.important ? (
+                                <IconButton
+                                    icon="star"
+                                    size={20}
+                                    iconColor="#F59E0B"
+                                    style={styles.actionIcon}
+                                />
+                            ) : (
+                                <IconButton
+                                    icon="star-outline"
+                                    size={20}
+                                    iconColor="#64748B"
+                                    style={styles.actionIcon}
+                                />
+                            )}
+                        </TouchableOpacity>
+
+                        {/* Кнопка выполнения - только иконка */}
+                        <TouchableOpacity
+                            style={[
+                                styles.actionButton,
+                                styles.completeButton,
+                                item.completed && styles.completeButtonActive
+                            ]}
+                            onPress={() => toggleCompleted(item.id)}
+                        >
+                            {item.completed ? (
+                                <IconButton
+                                    icon="check-circle"
+                                    size={20}
+                                    iconColor="#10B981"
+                                    style={styles.actionIcon}
+                                />
+                            ) : (
+                                <IconButton
+                                    icon="checkbox-blank-circle-outline"
+                                    size={20}
+                                    iconColor="#64748B"
+                                    style={styles.actionIcon}
+                                />
+                            )}
+                        </TouchableOpacity>
+
+                        {/* Кнопка удаления - только иконка */}
+                        <TouchableOpacity
+                            style={[styles.actionButton, styles.deleteButton]}
+                            onPress={() => deleteNote(item.id)}
+                        >
+                            <IconButton
+                                icon="delete-outline"
+                                size={20}
+                                iconColor="#EF4444"
+                                style={styles.actionIcon}
+                            />
+                        </TouchableOpacity>
                     </View>
                 </Card.Content>
             </Card>
@@ -390,227 +507,289 @@ const NotesScreen = () => {
 
     return (
         <PaperProvider>
-            <View style={styles.container}>
-                {/* Хедер с фильтрами */}
-                <LinearGradient
-                    colors={['#EC4899', '#F472B6']}
-                    style={styles.headerGradient}
-                >
-                    <View style={styles.headerContent}>
-                        <Title style={styles.headerTitle}>Мои заметки</Title>
-                        <Text style={styles.headerSubtitle}>
-                            {getFilteredNotes().length} заметок
-                        </Text>
+            <SafeAreaView style={styles.safeArea} edges={['top']}>
+                <View style={styles.container}>
+                    {/* Хедер с фильтрами - ОБНОВЛЕННЫЙ как в ScheduleScreen */}
+                    <LinearGradient
+                        colors={['#EC4899', '#F472B6']}
+                        style={styles.headerGradient}
+                    >
+                        <View style={styles.headerTopRow}>
+                            <View style={styles.groupContainer}>
+                                <Title style={styles.headerTitle}>Мои заметки</Title>
+                            </View>
+                        </View>
+
+                        <SegmentedButtons
+                            value={filter}
+                            onValueChange={setFilter}
+                            buttons={[
+                                {
+                                    value: 'all',
+                                    label: 'Все',
+                                    style: {
+                                        backgroundColor: filter === 'all' ? '#FFFFFF20' : 'transparent',
+                                    },
+                                },
+                                {
+                                    value: 'active',
+                                    label: 'Активные',
+                                    style: {
+                                        backgroundColor: filter === 'active' ? '#FFFFFF20' : 'transparent',
+                                    },
+                                },
+                                {
+                                    value: 'completed',
+                                    label: 'Готово',
+                                    style: {
+                                        backgroundColor: filter === 'completed' ? '#FFFFFF20' : 'transparent',
+                                    },
+                                },
+                            ]}
+                            style={styles.segmentedButtons}
+                        />
+                    </LinearGradient>
+
+                    <View style={styles.content}>
+                        {getFilteredNotes().length === 0 ? (
+                            <View style={styles.emptyState}>
+                                <Avatar.Icon
+                                    size={80}
+                                    icon="note"
+                                    style={styles.emptyIcon}
+                                />
+                                <Title style={styles.emptyTitle}>
+                                    {filter === 'completed' ? 'Нет готовых заметок' : 'Заметок пока нет'}
+                                </Title>
+                                <Text style={styles.emptyText}>
+                                    {filter === 'completed'
+                                        ? 'Готовые заметки появятся здесь'
+                                        : 'Создайте первую заметку для отслеживания заданий'
+                                    }
+                                </Text>
+                                <Button
+                                    mode="contained"
+                                    icon="plus"
+                                    onPress={showModal}
+                                    style={styles.emptyButton}
+                                >
+                                    Создать заметку
+                                </Button>
+                            </View>
+                        ) : (
+                            <FlatList
+                                data={getFilteredNotes()}
+                                keyExtractor={item => item.id}
+                                renderItem={renderNote}
+                                contentContainerStyle={styles.listContent}
+                                showsVerticalScrollIndicator={false}
+                                ItemSeparatorComponent={() => <View style={styles.separator} />}
+                            />
+                        )}
                     </View>
 
-                    <SegmentedButtons
-                        value={filter}
-                        onValueChange={setFilter}
-                        buttons={[
-                            {
-                                value: 'all',
-                                label: 'Все',
-                                style: {
-                                    backgroundColor: filter === 'all' ? '#FFFFFF20' : 'transparent',
-                                },
-                            },
-                            {
-                                value: 'active',
-                                label: 'Активные',
-                                style: {
-                                    backgroundColor: filter === 'active' ? '#FFFFFF20' : 'transparent',
-                                },
-                            },
-                            {
-                                value: 'completed',
-                                label: 'Выполнены',
-                                style: {
-                                    backgroundColor: filter === 'completed' ? '#FFFFFF20' : 'transparent',
-                                },
-                            },
-                        ]}
-                        style={styles.segmentedButtons}
+                    {/* FAB кнопка добавления - перенесена налево */}
+                    <FAB
+                        icon="plus"
+                        style={styles.fab}
+                        onPress={showModal}
+                        color="#FFFFFF"
                     />
-                </LinearGradient>
 
-                <View style={styles.content}>
-                    {getFilteredNotes().length === 0 ? (
-                        <View style={styles.emptyState}>
-                            <Avatar.Icon
-                                size={80}
-                                icon="note"
-                                style={styles.emptyIcon}
-                            />
-                            <Title style={styles.emptyTitle}>
-                                {filter === 'completed' ? 'Нет выполненных заметок' : 'Заметок пока нет'}
-                            </Title>
-                            <Text style={styles.emptyText}>
-                                {filter === 'completed'
-                                    ? 'Выполненные заметки появятся здесь'
-                                    : 'Создайте первую заметку для отслеживания заданий'
-                                }
-                            </Text>
-                            <Button
-                                mode="contained"
-                                icon="plus"
-                                onPress={showModal}
-                                style={styles.emptyButton}
-                            >
-                                Создать заметку
-                            </Button>
-                        </View>
-                    ) : (
-                        <FlatList
-                            data={getFilteredNotes()}
-                            keyExtractor={item => item.id}
-                            renderItem={renderNote}
-                            contentContainerStyle={styles.listContent}
-                            showsVerticalScrollIndicator={false}
-                            ItemSeparatorComponent={() => <View style={styles.separator} />}
-                        />
-                    )}
-                </View>
+                    {/* Модальное окно создания заметки */}
+                    <Portal>
+                        <Modal
+                            visible={visible}
+                            onDismiss={hideModal}
+                            contentContainerStyle={styles.modalContainer}
+                        >
+                            <Card style={styles.modalCard}>
+                                <Card.Content>
+                                    <Title style={styles.modalTitle}>Новая заметка</Title>
 
-                <FAB
-                    icon="plus"
-                    style={styles.fab}
-                    onPress={showModal}
-                    color="#FFFFFF"
-                />
+                                    <TextInput
+                                        label="Заголовок *"
+                                        value={newNote.title}
+                                        onChangeText={(text) => setNewNote({...newNote, title: text})}
+                                        mode="outlined"
+                                        style={styles.input}
+                                        placeholder="Название задания"
+                                    />
 
-                {/* Модальное окно создания заметки */}
-                <Portal>
-                    <Modal
-                        visible={visible}
-                        onDismiss={hideModal}
-                        contentContainerStyle={styles.modalContainer}
-                    >
-                        <Card style={styles.modalCard}>
-                            <Card.Content>
-                                <Title style={styles.modalTitle}>Новая заметка</Title>
+                                    <TextInput
+                                        label="Предмет *"
+                                        value={newNote.subject}
+                                        onChangeText={(text) => setNewNote({...newNote, subject: text})}
+                                        mode="outlined"
+                                        style={styles.input}
+                                        placeholder="Например: Математика"
+                                    />
 
-                                <TextInput
-                                    label="Предмет *"
-                                    value={newNote.subject}
-                                    onChangeText={(text) => setNewNote({...newNote, subject: text})}
-                                    mode="outlined"
-                                    style={styles.input}
-                                    placeholder="Например: Математика"
-                                />
+                                    <TextInput
+                                        label="Описание *"
+                                        value={newNote.content}
+                                        onChangeText={(text) => setNewNote({...newNote, content: text})}
+                                        mode="outlined"
+                                        multiline
+                                        numberOfLines={3}
+                                        style={styles.input}
+                                        placeholder="Подробное описание задания"
+                                    />
 
-                                <TextInput
-                                    label="Описание *"
-                                    value={newNote.content}
-                                    onChangeText={(text) => setNewNote({...newNote, content: text})}
-                                    mode="outlined"
-                                    multiline
-                                    numberOfLines={3}
-                                    style={styles.input}
-                                    placeholder="Подробное описание задания"
-                                />
-
-                                <View style={styles.deadlineSection}>
-                                    <Text style={styles.label}>Дедлайн</Text>
-                                    <View style={styles.deadlineButtons}>
-                                        <Button
-                                            mode={newNote.deadlineType === 'none' ? "contained" : "outlined"}
-                                            onPress={() => setNewNote({...newNote, deadlineType: 'none'})}
-                                            style={styles.deadlineButton}
-                                        >
-                                            Без дедлайна
-                                        </Button>
-                                        <Button
-                                            mode={newNote.deadlineType === 'date' ? "contained" : "outlined"}
-                                            onPress={() => setNewNote({...newNote, deadlineType: 'date'})}
-                                            style={styles.deadlineButton}
-                                        >
-                                            Конкретная дата
-                                        </Button>
+                                    <View style={styles.deadlineSection}>
+                                        <Text style={styles.label}>Дедлайн</Text>
+                                        <View style={styles.deadlineButtons}>
+                                            <Button
+                                                mode={newNote.deadlineType === 'none' ? "contained" : "outlined"}
+                                                onPress={() => setNewNote({...newNote, deadlineType: 'none'})}
+                                                style={styles.deadlineButton}
+                                            >
+                                                Без дедлайна
+                                            </Button>
+                                            <Button
+                                                mode={newNote.deadlineType === 'next_class' ? "contained" : "outlined"}
+                                                onPress={() => setNewNote({...newNote, deadlineType: 'next_class'})}
+                                                style={styles.deadlineButton}
+                                            >
+                                                До след. пары
+                                            </Button>
+                                            <Button
+                                                mode={newNote.deadlineType === 'date' ? "contained" : "outlined"}
+                                                onPress={() => setNewNote({...newNote, deadlineType: 'date'})}
+                                                style={styles.deadlineButton}
+                                            >
+                                                Конкретная дата
+                                            </Button>
+                                        </View>
                                     </View>
-                                </View>
 
-                                {newNote.deadlineType === 'date' && (
-                                    <View style={styles.dateSection}>
-                                        <Button
-                                            mode="outlined"
-                                            onPress={() => setShowDatePicker(true)}
-                                            style={styles.dateButton}
-                                            icon="calendar"
-                                        >
-                                            {formatDisplayDate(selectedDate)}
-                                        </Button>
-                                    </View>
-                                )}
+                                    {newNote.deadlineType === 'date' && (
+                                        <View style={styles.dateSection}>
+                                            <Text style={styles.label}>Дата выполнения</Text>
+                                            <View style={styles.dateInputRow}>
+                                                <TextInput
+                                                    value={formatDisplayDateShort(selectedDate)}
+                                                    mode="outlined"
+                                                    style={styles.dateInput}
+                                                    editable={false}
+                                                    right={<TextInput.Icon icon="calendar" onPress={showDatePickerModal} />}
+                                                />
+                                                <Button
+                                                    mode="outlined"
+                                                    onPress={showDatePickerModal}
+                                                    style={styles.datePickerButton}
+                                                >
+                                                    Выбрать
+                                                </Button>
+                                            </View>
+                                        </View>
+                                    )}
+                                </Card.Content>
+                                <Card.Actions style={styles.modalActions}>
+                                    <Button
+                                        mode="outlined"
+                                        onPress={hideModal}
+                                        style={styles.modalButton}
+                                    >
+                                        Отмена
+                                    </Button>
+                                    <Button
+                                        mode="contained"
+                                        onPress={addNote}
+                                        style={styles.modalButton}
+                                        disabled={!newNote.title.trim() || !newNote.content.trim() || !newNote.subject.trim()}
+                                    >
+                                        Добавить
+                                    </Button>
+                                </Card.Actions>
+                            </Card>
+                        </Modal>
+                    </Portal>
 
-                                {showDatePicker && (
+                    {/* Модальное окно выбора даты */}
+                    <Portal>
+                        <Modal
+                            visible={showDatePicker}
+                            onDismiss={hideDatePicker}
+                            contentContainerStyle={styles.datePickerModalContainer}
+                        >
+                            <Card style={styles.datePickerCard}>
+                                <Card.Content>
+                                    <Title style={styles.datePickerTitle}>Выберите дату</Title>
                                     <DateTimePicker
                                         value={selectedDate}
                                         mode="date"
-                                        display="default"
-                                        onChange={onDateChange}
+                                        display="spinner"
+                                        onChange={(event, date) => {
+                                            if (date) {
+                                                setSelectedDate(date);
+                                                setShowDatePicker(false);
+                                            }
+                                        }}
+                                        locale="ru"
+                                        style={styles.datePicker}
                                         minimumDate={new Date()}
                                     />
-                                )}
-                            </Card.Content>
-                            <Card.Actions style={styles.modalActions}>
-                                <Button
-                                    mode="outlined"
-                                    onPress={hideModal}
-                                    style={styles.modalButton}
-                                >
-                                    Отмена
-                                </Button>
-                                <Button
-                                    mode="contained"
-                                    onPress={addNote}
-                                    style={styles.modalButton}
-                                    disabled={!newNote.title.trim() || !newNote.content.trim() || !newNote.subject.trim()}
-                                >
-                                    Добавить
-                                </Button>
-                            </Card.Actions>
-                        </Card>
-                    </Modal>
-                </Portal>
-            </View>
+                                    <View style={styles.datePickerActions}>
+                                        <Button
+                                            mode="contained"
+                                            onPress={hideDatePicker}
+                                            style={styles.datePickerButton}
+                                        >
+                                            Готово
+                                        </Button>
+                                    </View>
+                                </Card.Content>
+                            </Card>
+                        </Modal>
+                    </Portal>
+                </View>
+            </SafeAreaView>
         </PaperProvider>
     );
 };
 
 const styles = StyleSheet.create({
+    safeArea: {
+        flex: 1,
+        backgroundColor: '#EC4899',
+    },
     container: {
         flex: 1,
         backgroundColor: '#F8FAFC',
     },
+    // ОБНОВЛЕННЫЕ СТИЛИ HEADER как в ScheduleScreen
     headerGradient: {
-        paddingTop: 60,
-        paddingBottom: 20,
-        borderBottomLeftRadius: 24,
-        borderBottomRightRadius: 24,
+        paddingTop: 8,
+        paddingBottom: 16,
+        borderBottomLeftRadius: 20,
+        borderBottomRightRadius: 20,
     },
-    headerContent: {
+    headerTopRow: {
+        flexDirection: 'row',
+        justifyContent: 'center',
         alignItems: 'center',
-        paddingHorizontal: 20,
-        marginBottom: 16,
+        paddingHorizontal: 16,
+        paddingTop: 8,
+        paddingBottom: 8,
+    },
+    groupContainer: {
+        alignItems: 'center',
     },
     headerTitle: {
         color: '#FFFFFF',
-        fontSize: 28,
+        fontSize: 20,
         fontWeight: '700',
     },
-    headerSubtitle: {
-        color: '#FFFFFF',
-        fontSize: 16,
-        opacity: 0.9,
-        marginTop: 4,
-    },
     segmentedButtons: {
-        marginHorizontal: 20,
+        marginHorizontal: 16,
+        marginTop: 8,
     },
     content: {
         flex: 1,
-        padding: 16,
-        paddingBottom: 90, // ДОБАВЬТЕ ЭТУ СТРОКУ
+        padding: 12,
+        backgroundColor: '#F8FAFC',
+        paddingBottom: 90,
     },
     listContent: {
         paddingBottom: 20,
@@ -666,18 +845,49 @@ const styles = StyleSheet.create({
         textDecorationLine: 'line-through',
         color: '#94A3B8',
     },
-    noteFooter: {
+    // Новые стили для красивых кнопок действий
+    actionsContainer: {
         flexDirection: 'row',
         justifyContent: 'flex-end',
-    },
-    actions: {
-        flexDirection: 'row',
+        alignItems: 'center',
+        marginTop: 8,
         gap: 8,
     },
     actionButton: {
+        width: 44,
+        height: 44,
+        borderRadius: 12,
+        borderWidth: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    actionIcon: {
         margin: 0,
-        minWidth: 44,
-        minHeight: 44,
+        width: 24,
+        height: 24,
+    },
+    // Стили для кнопки избранного
+    favoriteButton: {
+        borderColor: '#FEF3C7',
+        backgroundColor: '#FFFBEB',
+    },
+    favoriteButtonActive: {
+        borderColor: '#F59E0B',
+        backgroundColor: '#FEF3C7',
+    },
+    // Стили для кнопки выполнения
+    completeButton: {
+        borderColor: '#D1FAE5',
+        backgroundColor: '#ECFDF5',
+    },
+    completeButtonActive: {
+        borderColor: '#10B981',
+        backgroundColor: '#D1FAE5',
+    },
+    // Стили для кнопки удаления
+    deleteButton: {
+        borderColor: '#FEE2E2',
+        backgroundColor: '#FEF2F2',
     },
     separator: {
         height: 12,
@@ -687,7 +897,7 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         alignItems: 'center',
         padding: 40,
-        paddingBottom: 90, // ДОБАВЬТЕ ЭТУ СТРОКУ
+        paddingBottom: 90,
     },
     emptyIcon: {
         backgroundColor: '#E2E8F0',
@@ -710,11 +920,12 @@ const styles = StyleSheet.create({
     emptyButton: {
         backgroundColor: '#EC4899',
     },
+    // FAB кнопка перенесена налево
     fab: {
         position: 'absolute',
         margin: 16,
-        right: 0,
-        bottom: 80, // ИЗМЕНИТЕ С 0 НА 80 чтобы не перекрывалось панелью
+        left: 0,
+        bottom: 100,
     },
     modalContainer: {
         margin: 20,
@@ -751,11 +962,18 @@ const styles = StyleSheet.create({
     },
     dateSection: {
         marginBottom: 16,
-        alignItems: 'center',
     },
-    dateButton: {
-        borderColor: '#6366F1',
-        width: '100%',
+    dateInputRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+    },
+    dateInput: {
+        flex: 1,
+        backgroundColor: '#FFFFFF',
+    },
+    datePickerButton: {
+        minWidth: 100,
     },
     modalActions: {
         justifyContent: 'space-between',
@@ -764,6 +982,29 @@ const styles = StyleSheet.create({
     },
     modalButton: {
         minWidth: 100,
+    },
+    // Стили для модального окна выбора даты
+    datePickerModalContainer: {
+        margin: 20,
+    },
+    datePickerCard: {
+        borderRadius: 20,
+        backgroundColor: '#FFFFFF',
+    },
+    datePickerTitle: {
+        textAlign: 'center',
+        marginBottom: 16,
+        color: '#1E293B',
+        fontSize: 20,
+        fontWeight: '700',
+    },
+    datePicker: {
+        height: 200,
+        marginBottom: 16,
+    },
+    datePickerActions: {
+        flexDirection: 'row',
+        justifyContent: 'center',
     },
 });
 
