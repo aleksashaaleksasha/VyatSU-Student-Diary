@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { View, StyleSheet, ScrollView } from 'react-native';
 import { Card, Title, TextInput, Button, List, Chip } from 'react-native-paper';
 import * as SQLite from 'expo-sqlite';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 const db = SQLite.openDatabaseSync('student_diary.db');
 

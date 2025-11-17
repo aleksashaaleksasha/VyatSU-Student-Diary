@@ -1,17 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { View, StyleSheet, ScrollView, Alert } from 'react-native';
-import { Card, Title, Paragraph, Switch, List, Button, Divider, Chip, Dialog, Portal } from 'react-native-paper';
+import { Card, Title, Paragraph, Button, TextInput, Chip, Dialog, Portal } from 'react-native-paper';
 import { useNavigation } from '@react-navigation/native';
 import * as SQLite from 'expo-sqlite';
 
 const db = SQLite.openDatabaseSync('student_diary.db');
 
 const SettingsScreen = () => {
-    const [notifications, setNotifications] = React.useState(true);
-    const [deadlineReminders, setDeadlineReminders] = React.useState(true);
-    const [scheduleChanges, setScheduleChanges] = React.useState(true);
-    const [userGroup, setUserGroup] = React.useState('');
-    const [clearDialogVisible, setClearDialogVisible] = React.useState(false);
+    const [userGroup, setUserGroup] = useState('');
+    const [newGroup, setNewGroup] = useState('');
+    const [clearDialogVisible, setClearDialogVisible] = useState(false);
     const navigation = useNavigation();
 
     useEffect(() => {
@@ -23,89 +21,70 @@ const SettingsScreen = () => {
             const result = db.getFirstSync('SELECT value FROM settings WHERE key = "user_group"') as any;
             if (result) {
                 setUserGroup(result.value);
+                setNewGroup(result.value);
             }
         } catch (error) {
             console.log('Error loading user group:', error);
         }
     };
 
+    const saveGroup = () => {
+        if (!newGroup.trim()) {
+            Alert.alert('Ошибка', 'Введите номер группы');
+            return;
+        }
+
+        try {
+            db.runSync(
+                `INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)`,
+                ['user_group', newGroup.trim()]
+            );
+            setUserGroup(newGroup.trim());
+            Alert.alert('Успех', 'Группа сохранена');
+        } catch (error) {
+            console.log('Error saving group:', error);
+            Alert.alert('Ошибка', 'Не удалось сохранить группу');
+        }
+    };
+
     const clearAllData = () => {
         try {
-            // Удаляем все данные из всех таблиц
             db.withTransactionSync(() => {
-                // Очищаем расписание
                 db.runSync('DELETE FROM schedule;');
-
-                // Очищаем историю обновлений
                 db.runSync('DELETE FROM update_history;');
-
-                // Очищаем настройки (кроме группы пользователя)
+                db.runSync('DELETE FROM notes;');
                 db.runSync('DELETE FROM settings WHERE key != "user_group";');
             });
 
-            Alert.alert(
-                'Успех',
-                'Все данные успешно очищены',
-                [{ text: 'OK' }]
-            );
-
+            Alert.alert('Успех', 'Все данные успешно очищены');
             setClearDialogVisible(false);
-
-            // Обновляем экраны
             navigation.navigate('Расписание' as never);
 
         } catch (error) {
             console.log('Error clearing data:', error);
-            Alert.alert(
-                'Ошибка',
-                'Не удалось очистить данные',
-                [{ text: 'OK' }]
-            );
+            Alert.alert('Ошибка', 'Не удалось очистить данные');
         }
     };
 
     const clearAllDataIncludingGroup = () => {
         try {
-            // Удаляем все данные из всех таблиц включая группу
             db.withTransactionSync(() => {
-                // Очищаем расписание
                 db.runSync('DELETE FROM schedule;');
-
-                // Очищаем историю обновлений
                 db.runSync('DELETE FROM update_history;');
-
-                // Очищаем все настройки
+                db.runSync('DELETE FROM notes;');
                 db.runSync('DELETE FROM settings;');
             });
 
-            Alert.alert(
-                'Успех',
-                'Все данные успешно очищены, включая выбранную группу',
-                [{ text: 'OK' }]
-            );
-
             setUserGroup('');
+            setNewGroup('');
+            Alert.alert('Успех', 'Все данные успешно очищены, включая выбранную группу');
             setClearDialogVisible(false);
-
-            // Обновляем экраны
             navigation.navigate('Расписание' as never);
 
         } catch (error) {
             console.log('Error clearing data:', error);
-            Alert.alert(
-                'Ошибка',
-                'Не удалось очистить данные',
-                [{ text: 'OK' }]
-            );
+            Alert.alert('Ошибка', 'Не удалось очистить данные');
         }
-    };
-
-    const showClearDialog = () => {
-        setClearDialogVisible(true);
-    };
-
-    const hideClearDialog = () => {
-        setClearDialogVisible(false);
     };
 
     const handleClearData = () => {
@@ -133,25 +112,25 @@ const SettingsScreen = () => {
 
     const createBackup = () => {
         try {
-            // Создаем резервную копию всех данных
             const scheduleData = db.getAllSync('SELECT * FROM schedule;') as any[];
             const settingsData = db.getAllSync('SELECT * FROM settings;') as any[];
             const updateHistoryData = db.getAllSync('SELECT * FROM update_history;') as any[];
+            const notesData = db.getAllSync('SELECT * FROM notes;') as any[];
 
             const backup = {
                 schedule: scheduleData,
                 settings: settingsData,
                 updateHistory: updateHistoryData,
+                notes: notesData,
                 timestamp: new Date().toISOString(),
                 version: '1.0.0'
             };
 
-            // В реальном приложении здесь можно сохранить файл или отправить на сервер
             console.log('Backup created:', backup);
 
             Alert.alert(
                 'Резервная копия',
-                `Создана резервная копия данных:\n- Расписание: ${scheduleData.length} записей\n- Настройки: ${settingsData.length} записей\n- История: ${updateHistoryData.length} записей`,
+                `Создана резервная копия данных:\n- Расписание: ${scheduleData.length} записей\n- Настройки: ${settingsData.length} записей\n- История: ${updateHistoryData.length} записей\n- Заметки: ${notesData.length} записей`,
                 [{ text: 'OK' }]
             );
 
@@ -171,27 +150,34 @@ const SettingsScreen = () => {
 
     return (
         <ScrollView style={styles.container}>
-            {/* Добавляем карточку выбора группы */}
             <Card style={styles.card}>
                 <Card.Content>
                     <Title>Учебная группа</Title>
-                    <Paragraph>Выберите вашу учебную группу для корректного отображения расписания</Paragraph>
+                    <Paragraph>Введите вашу учебную группу для корректного отображения расписания</Paragraph>
 
                     {userGroup ? (
                         <Chip mode="outlined" style={styles.groupChip}>
-                            {userGroup}
+                            Текущая группа: {userGroup}
                         </Chip>
-                    ) : (
-                        <Paragraph style={styles.noGroupText}>Группа не выбрана</Paragraph>
-                    )}
+                    ) : null}
+
+                    <TextInput
+                        label="Номер группы"
+                        value={newGroup}
+                        onChangeText={setNewGroup}
+                        mode="outlined"
+                        style={styles.input}
+                        placeholder="Например: ИСПк-104-52-00"
+                    />
 
                     <Button
-                        mode="outlined"
-                        icon="account-group"
-                        onPress={() => navigation.navigate('GroupSelect' as never)}
+                        mode="contained"
+                        icon="check"
+                        onPress={saveGroup}
                         style={styles.button}
+                        disabled={!newGroup.trim()}
                     >
-                        {userGroup ? 'Изменить группу' : 'Выбрать группу'}
+                        Сохранить группу
                     </Button>
                 </Card.Content>
             </Card>
@@ -219,49 +205,12 @@ const SettingsScreen = () => {
 
                     <Button
                         mode="contained"
-                        icon="vk"
+                        icon="refresh" // ЗАМЕНИЛ НА refresh
                         onPress={() => navigation.navigate('VkSchedule' as never)}
                         style={styles.button}
-                        buttonColor="#4A76A8"
                     >
                         Управление обновлениями
                     </Button>
-                </Card.Content>
-            </Card>
-
-            <Card style={styles.card}>
-                <Card.Content>
-                    <Title>Уведомления</Title>
-                    <List.Item
-                        title="Включить уведомления"
-                        description="Получать push-уведомления"
-                        right={() => (
-                            <Switch
-                                value={notifications}
-                                onValueChange={setNotifications}
-                            />
-                        )}
-                    />
-                    <List.Item
-                        title="Напоминания о дедлайнах"
-                        description="Уведомления о заданиях"
-                        right={() => (
-                            <Switch
-                                value={deadlineReminders}
-                                onValueChange={setDeadlineReminders}
-                            />
-                        )}
-                    />
-                    <List.Item
-                        title="Изменения расписания"
-                        description="Уведомления об изменениях"
-                        right={() => (
-                            <Switch
-                                value={scheduleChanges}
-                                onValueChange={setScheduleChanges}
-                            />
-                        )}
-                    />
                 </Card.Content>
             </Card>
 
@@ -295,30 +244,6 @@ const SettingsScreen = () => {
                     </Button>
                 </Card.Content>
             </Card>
-
-            <Card style={styles.card}>
-                <Card.Content>
-                    <Title>О приложении</Title>
-                    <Paragraph>Дневник студента ВятГУ</Paragraph>
-                    <Paragraph>Версия 1.0.0</Paragraph>
-                </Card.Content>
-            </Card>
-
-            {/* Диалог подтверждения очистки */}
-            <Portal>
-                <Dialog visible={clearDialogVisible} onDismiss={hideClearDialog}>
-                    <Dialog.Title>Очистка данных</Dialog.Title>
-                    <Dialog.Content>
-                        <Paragraph>Вы уверены, что хотите очистить все данные? Это действие нельзя отменить.</Paragraph>
-                    </Dialog.Content>
-                    <Dialog.Actions>
-                        <Button onPress={hideClearDialog}>Отмена</Button>
-                        <Button onPress={clearAllData} textColor="red">
-                            Очистить
-                        </Button>
-                    </Dialog.Actions>
-                </Dialog>
-            </Portal>
         </ScrollView>
     );
 };
@@ -328,6 +253,7 @@ const styles = StyleSheet.create({
         flex: 1,
         padding: 16,
         backgroundColor: '#f8f9fa',
+        paddingBottom: 90,
     },
     card: {
         marginBottom: 16,
@@ -335,13 +261,12 @@ const styles = StyleSheet.create({
     button: {
         marginVertical: 4,
     },
+    input: {
+        marginBottom: 12,
+        backgroundColor: '#FFFFFF',
+    },
     groupChip: {
         alignSelf: 'flex-start',
-        marginBottom: 12,
-    },
-    noGroupText: {
-        fontStyle: 'italic',
-        color: '#666',
         marginBottom: 12,
     },
 });

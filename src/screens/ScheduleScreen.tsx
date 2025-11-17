@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, FlatList, TouchableOpacity, Dimensions, Animated } from 'react-native';
+import { View, StyleSheet, FlatList, TouchableOpacity, Dimensions, Animated, Alert } from 'react-native';
 import {
     Card,
     Title,
@@ -13,7 +13,6 @@ import {
     Provider as PaperProvider,
     Divider,
     Menu,
-    Avatar,
 } from 'react-native-paper';
 import { format, isAfter, isToday, isSameDay, addDays, subDays } from 'date-fns';
 import { ru } from 'date-fns/locale';
@@ -43,6 +42,7 @@ const ScheduleScreen = () => {
     const [schedule, setSchedule] = useState<ScheduleItem[]>([]);
     const [contextMenuVisible, setContextMenuVisible] = useState(false);
     const [selectedScheduleItem, setSelectedScheduleItem] = useState<ScheduleItem | null>(null);
+    const [contextMenuAnchor, setContextMenuAnchor] = useState({ x: 0, y: 0 });
     const [quickNoteModalVisible, setQuickNoteModalVisible] = useState(false);
     const [quickNote, setQuickNote] = useState({
         title: '',
@@ -51,6 +51,7 @@ const ScheduleScreen = () => {
     });
     const [selectedNoteDate, setSelectedNoteDate] = useState(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000));
     const [showNoteDatePicker, setShowNoteDatePicker] = useState(false);
+    const [userGroup, setUserGroup] = useState('');
     const fadeAnim = useState(new Animated.Value(0))[0];
 
     const isFocused = useIsFocused();
@@ -59,6 +60,7 @@ const ScheduleScreen = () => {
     useEffect(() => {
         initDatabase();
         loadScheduleFromDB();
+        loadUserGroup();
         Animated.timing(fadeAnim, {
             toValue: 1,
             duration: 500,
@@ -69,23 +71,24 @@ const ScheduleScreen = () => {
     useEffect(() => {
         if (isFocused) {
             loadScheduleFromDB();
+            loadUserGroup();
         }
     }, [isFocused]);
 
     const initDatabase = () => {
         try {
             db.execSync(`
-        CREATE TABLE IF NOT EXISTS schedule (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          subject TEXT NOT NULL,
-          time TEXT NOT NULL,
-          teacher TEXT NOT NULL,
-          classroom TEXT NOT NULL,
-          date TEXT NOT NULL,
-          type TEXT NOT NULL,
-          student_group TEXT NOT NULL
-        );
-      `);
+                CREATE TABLE IF NOT EXISTS schedule (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    subject TEXT NOT NULL,
+                    time TEXT NOT NULL,
+                    teacher TEXT NOT NULL,
+                    classroom TEXT NOT NULL,
+                    date TEXT NOT NULL,
+                    type TEXT NOT NULL,
+                    student_group TEXT NOT NULL
+                );
+            `);
         } catch (error) {
             console.log('Error creating table:', error);
         }
@@ -101,6 +104,17 @@ const ScheduleScreen = () => {
             setSchedule(scheduleData);
         } catch (error) {
             console.log('Error loading schedule:', error);
+        }
+    };
+
+    const loadUserGroup = () => {
+        try {
+            const result = db.getFirstSync('SELECT value FROM settings WHERE key = "user_group"') as any;
+            if (result) {
+                setUserGroup(result.value);
+            }
+        } catch (error) {
+            console.log('Error loading user group:', error);
         }
     };
 
@@ -139,16 +153,6 @@ const ScheduleScreen = () => {
             case 'Лабораторная': return '#F59E0B';
             case 'Семинар': return '#EC4899';
             default: return '#6B7280';
-        }
-    };
-
-    const getTypeIcon = (type: string) => {
-        switch (type) {
-            case 'Лекция': return 'school';
-            case 'Практика': return 'group-work';
-            case 'Лабораторная': return 'science';
-            case 'Семинар': return 'forum';
-            default: return 'class';
         }
     };
 
@@ -197,8 +201,8 @@ const ScheduleScreen = () => {
 
         try {
             db.runSync(
-                `INSERT INTO notes (id, title, content, subject, deadline, deadlineType, createdAt, important, completed, nextClassDate) 
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+                `INSERT INTO notes (id, title, content, subject, deadline, deadlineType, createdAt, important, completed, nextClassDate)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
                 [
                     note.id,
                     note.title,
@@ -248,89 +252,88 @@ const ScheduleScreen = () => {
         return format(date, 'd MMMM yyyy', { locale: ru });
     };
 
-    const renderScheduleItem = ({ item, index }: { item: ScheduleItem; index: number }) => (
-        <Animated.View
-            style={[
-                styles.scheduleItemContainer,
-                {
-                    opacity: fadeAnim,
-                    transform: [{
-                        translateY: fadeAnim.interpolate({
-                            inputRange: [0, 1],
-                            outputRange: [50 * (index + 1), 0],
-                        }),
-                    }],
-                },
-            ]}
-        >
-            <TouchableOpacity
-                onLongPress={() => {
-                    setSelectedScheduleItem(item);
-                    setContextMenuVisible(true);
-                }}
-                delayLongPress={500}
+    const renderScheduleItem = ({ item, index }: { item: ScheduleItem; index: number }) => {
+        const classrooms = item.classroom.split(',').map(cls => cls.trim());
+
+        return (
+            <Animated.View
+                style={[
+                    styles.scheduleItemContainer,
+                    {
+                        opacity: fadeAnim,
+                        transform: [{
+                            translateY: fadeAnim.interpolate({
+                                inputRange: [0, 1],
+                                outputRange: [30 * (index + 1), 0],
+                            }),
+                        }],
+                    },
+                ]}
             >
-                <Card style={styles.scheduleCard}>
-                    <LinearGradient
-                        colors={['#FFFFFF', '#F8FAFC']}
-                        style={styles.cardGradient}
-                    >
-                        <Card.Content>
-                            <View style={styles.scheduleHeader}>
-                                <View style={styles.timeIndicator}>
-                                    <View style={[styles.timeDot, { backgroundColor: getTypeColor(item.type) }]} />
+                <TouchableOpacity
+                    onLongPress={(event) => {
+                        setSelectedScheduleItem(item);
+                        const { pageX, pageY } = event.nativeEvent;
+                        setContextMenuAnchor({ x: pageX, y: pageY });
+                        setContextMenuVisible(true);
+                    }}
+                    delayLongPress={500}
+                >
+                    <Card style={styles.scheduleCard}>
+                        <View style={styles.cardContent}>
+                            <View style={styles.lessonHeader}>
+                                <View style={styles.timeSection}>
                                     <Text style={styles.timeText}>{item.time}</Text>
                                 </View>
                                 <Chip
                                     mode="flat"
-                                    style={[styles.typeChip, { backgroundColor: getTypeColor(item.type) + '20' }]}
-                                    textStyle={{ color: getTypeColor(item.type), fontWeight: '600' }}
-                                    avatar={<Avatar.Icon size={24} icon={getTypeIcon(item.type)} style={{ backgroundColor: getTypeColor(item.type) }} />}
+                                    style={[styles.typeChip, { backgroundColor: getTypeColor(item.type) + '15' }]}
+                                    textStyle={{
+                                        color: getTypeColor(item.type),
+                                        fontSize: 12,
+                                        fontWeight: '600',
+                                        lineHeight: 16,
+                                    }}
                                 >
                                     {item.type}
                                 </Chip>
                             </View>
 
-                            <Title style={styles.subjectTitle}>{item.subject}</Title>
+                            <Text style={styles.subjectTitle}>{item.subject}</Text>
 
-                            <View style={styles.detailsGrid}>
-                                <View style={styles.detailItem}>
-                                    <Avatar.Icon size={24} icon="person" style={styles.detailIcon} />
-                                    <Text style={styles.detailText} numberOfLines={1}>{item.teacher}</Text>
-                                </View>
-                                <View style={styles.detailItem}>
-                                    <Avatar.Icon size={24} icon="place" style={styles.detailIcon} />
-                                    <Text style={styles.detailText}>{item.classroom}</Text>
-                                </View>
+                            <View style={styles.detailsRow}>
+                                <Text style={styles.teacherText} numberOfLines={1}>{item.teacher}</Text>
+                                <Text style={styles.classroomText}>
+                                    {classrooms.join(', ')}
+                                </Text>
                             </View>
-
-                            {item.student_group && item.student_group !== 'Ручное добавление' && (
-                                <View style={styles.groupBadge}>
-                                    <Text style={styles.groupText}>{item.student_group}</Text>
-                                </View>
-                            )}
-                        </Card.Content>
-                    </LinearGradient>
-                </Card>
-            </TouchableOpacity>
-        </Animated.View>
-    );
+                        </View>
+                    </Card>
+                </TouchableOpacity>
+            </Animated.View>
+        );
+    };
 
     return (
         <PaperProvider>
             <View style={styles.container}>
-                {/* Красивый хедер с датой */}
                 <LinearGradient
                     colors={['#6366F1', '#8B5CF6']}
                     style={styles.headerGradient}
                 >
+                    {userGroup && (
+                        <View style={styles.groupContainer}>
+                            <Text style={styles.groupText}>{userGroup}</Text>
+                        </View>
+                    )}
+
                     <View style={styles.dateHeader}>
                         <Button
                             icon="chevron-left"
                             onPress={() => handleDateChange('prev')}
                             mode="text"
                             textColor="#FFFFFF"
-                            compact
+                            style={styles.navButton}
                         >
                             {''}
                         </Button>
@@ -339,14 +342,8 @@ const ScheduleScreen = () => {
                             style={styles.dateInfo}
                             onPress={() => setShowDatePicker(true)}
                         >
-                            <Text style={styles.dateDay}>
-                                {format(selectedDate, 'EEEE', { locale: ru })}
-                            </Text>
                             <Text style={styles.dateNumber}>
                                 {format(selectedDate, 'd MMMM yyyy', { locale: ru })}
-                            </Text>
-                            <Text style={styles.dateHint}>
-                                Нажмите для выбора даты
                             </Text>
                         </TouchableOpacity>
 
@@ -355,7 +352,7 @@ const ScheduleScreen = () => {
                             onPress={() => handleDateChange('next')}
                             mode="text"
                             textColor="#FFFFFF"
-                            compact
+                            style={styles.navButton}
                         >
                             {''}
                         </Button>
@@ -363,32 +360,49 @@ const ScheduleScreen = () => {
                 </LinearGradient>
 
                 {showDatePicker && (
-                    <DateTimePicker
-                        value={selectedDate}
-                        mode="date"
-                        display="default"
-                        onChange={handleDateSelect}
-                    />
+                    <Modal
+                        visible={showDatePicker}
+                        onDismiss={() => setShowDatePicker(false)}
+                        contentContainerStyle={styles.calendarModalContainer}
+                    >
+                        <Card style={styles.calendarCard}>
+                            <Card.Content>
+                                <View style={styles.calendarHeader}>
+                                    <Title style={styles.calendarTitle}>Выберите дату</Title>
+                                    <Button
+                                        icon="close"
+                                        mode="text"
+                                        onPress={() => setShowDatePicker(false)}
+                                        textColor="#6366F1"
+                                    >
+                                        Закрыть
+                                    </Button>
+                                </View>
+                                <DateTimePicker
+                                    value={selectedDate}
+                                    mode="date"
+                                    display="spinner"
+                                    onChange={handleDateSelect}
+                                    locale="ru"
+                                    style={styles.calendarPicker}
+                                    textColor="#6366F1"
+                                    accentColor="#6366F1"
+                                />
+                            </Card.Content>
+                        </Card>
+                    </Modal>
                 )}
 
-                {/* Контент расписания */}
                 <View style={styles.content}>
                     <View style={styles.scheduleHeader}>
                         <Text style={styles.sectionTitle}>
-                            Расписание на день
+                            {format(selectedDate, 'EEEE', { locale: ru }).charAt(0).toUpperCase() + format(selectedDate, 'EEEE', { locale: ru }).slice(1)}
                         </Text>
-                        <Chip mode="outlined" style={styles.countChip}>
-                            {filteredSchedule.length} пар
-                        </Chip>
                     </View>
 
                     {filteredSchedule.length === 0 ? (
                         <View style={styles.emptyState}>
-                            <Avatar.Icon
-                                size={80}
-                                icon="calendar-remove"
-                                style={styles.emptyIcon}
-                            />
+                            <Text style={styles.emptyIcon}>📅</Text>
                             <Title style={styles.emptyTitle}>Пар нет 🎉</Title>
                             <Text style={styles.emptyText}>
                                 На этот день занятий не запланировано
@@ -414,20 +428,11 @@ const ScheduleScreen = () => {
                     )}
                 </View>
 
-                <FAB
-                    icon="calendar-today"
-                    style={styles.fab}
-                    onPress={() => setSelectedDate(new Date())}
-                    label="Сегодня"
-                    color="#FFFFFF"
-                />
-
-                {/* Контекстное меню */}
                 <Portal>
                     <Menu
                         visible={contextMenuVisible}
                         onDismiss={() => setContextMenuVisible(false)}
-                        anchor={{ x: 0, y: 0 }}
+                        anchor={contextMenuAnchor}
                         contentStyle={styles.menuContent}
                     >
                         <Menu.Item
@@ -438,18 +443,25 @@ const ScheduleScreen = () => {
                         <Divider />
                         <Menu.Item
                             leadingIcon="information"
-                            title="Информация"
+                            title="Информация о паре"
                             onPress={() => {
-                                if (selectedScheduleItem) {
-                                    // Можно добавить детальную информацию
-                                }
                                 setContextMenuVisible(false);
+                                if (selectedScheduleItem) {
+                                    Alert.alert(
+                                        'Информация о паре',
+                                        `Предмет: ${selectedScheduleItem.subject}\n` +
+                                        `Преподаватель: ${selectedScheduleItem.teacher}\n` +
+                                        `Аудитория: ${selectedScheduleItem.classroom}\n` +
+                                        `Тип: ${selectedScheduleItem.type}\n` +
+                                        `Время: ${selectedScheduleItem.time}`,
+                                        [{ text: 'OK' }]
+                                    );
+                                }
                             }}
                         />
                     </Menu>
                 </Portal>
 
-                {/* Модальное окно быстрой заметки */}
                 <Portal>
                     <Modal
                         visible={quickNoteModalVisible}
@@ -457,98 +469,93 @@ const ScheduleScreen = () => {
                         contentContainerStyle={styles.modalContainer}
                     >
                         <Card style={styles.modalCard}>
-                            <LinearGradient
-                                colors={['#FFFFFF', '#F8FAFC']}
-                                style={styles.modalGradient}
-                            >
-                                <Card.Content>
-                                    <Title style={styles.modalTitle}>Быстрая заметка</Title>
-                                    <Text style={styles.modalSubtitle}>
-                                        Предмет: {selectedScheduleItem?.subject}
-                                    </Text>
+                            <Card.Content>
+                                <Title style={styles.modalTitle}>Быстрая заметка</Title>
+                                <Text style={styles.modalSubtitle}>
+                                    Предмет: {selectedScheduleItem?.subject}
+                                </Text>
 
-                                    <TextInput
-                                        label="Заголовок *"
-                                        value={quickNote.title}
-                                        onChangeText={(text) => setQuickNote({...quickNote, title: text})}
-                                        mode="outlined"
-                                        style={styles.input}
-                                        placeholder="Название задания"
-                                    />
+                                <TextInput
+                                    label="Заголовок *"
+                                    value={quickNote.title}
+                                    onChangeText={(text) => setQuickNote({...quickNote, title: text})}
+                                    mode="outlined"
+                                    style={styles.input}
+                                    placeholder="Название задания"
+                                />
 
-                                    <TextInput
-                                        label="Описание"
-                                        value={quickNote.content}
-                                        onChangeText={(text) => setQuickNote({...quickNote, content: text})}
-                                        mode="outlined"
-                                        multiline
-                                        numberOfLines={3}
-                                        style={styles.input}
-                                        placeholder="Подробное описание задания"
-                                    />
+                                <TextInput
+                                    label="Описание"
+                                    value={quickNote.content}
+                                    onChangeText={(text) => setQuickNote({...quickNote, content: text})}
+                                    mode="outlined"
+                                    multiline
+                                    numberOfLines={3}
+                                    style={styles.input}
+                                    placeholder="Подробное описание задания"
+                                />
 
-                                    <View style={styles.deadlineSection}>
-                                        <Text style={styles.label}>Дедлайн</Text>
-                                        <View style={styles.deadlineButtons}>
-                                            <Button
-                                                mode={quickNote.deadlineType === 'next_class' ? "contained" : "outlined"}
-                                                onPress={() => setQuickNote({...quickNote, deadlineType: 'next_class'})}
-                                                style={styles.deadlineButton}
-                                            >
-                                                До след. занятия
-                                            </Button>
-                                            <Button
-                                                mode={quickNote.deadlineType === 'date' ? "contained" : "outlined"}
-                                                onPress={() => setQuickNote({...quickNote, deadlineType: 'date'})}
-                                                style={styles.deadlineButton}
-                                            >
-                                                Конкретная дата
-                                            </Button>
-                                        </View>
+                                <View style={styles.deadlineSection}>
+                                    <Text style={styles.label}>Дедлайн</Text>
+                                    <View style={styles.deadlineButtons}>
+                                        <Button
+                                            mode={quickNote.deadlineType === 'next_class' ? "contained" : "outlined"}
+                                            onPress={() => setQuickNote({...quickNote, deadlineType: 'next_class'})}
+                                            style={styles.deadlineButton}
+                                        >
+                                            До след. занятия
+                                        </Button>
+                                        <Button
+                                            mode={quickNote.deadlineType === 'date' ? "contained" : "outlined"}
+                                            onPress={() => setQuickNote({...quickNote, deadlineType: 'date'})}
+                                            style={styles.deadlineButton}
+                                        >
+                                            Конкретная дата
+                                        </Button>
                                     </View>
+                                </View>
 
-                                    {quickNote.deadlineType === 'date' && (
-                                        <View style={styles.dateSection}>
-                                            <Text style={styles.dateLabel}>Дата выполнения</Text>
-                                            <Button
-                                                mode="outlined"
-                                                onPress={() => setShowNoteDatePicker(true)}
-                                                style={styles.dateButton}
-                                                icon="calendar"
-                                            >
-                                                {formatDisplayDate(selectedNoteDate)}
-                                            </Button>
-                                        </View>
-                                    )}
+                                {quickNote.deadlineType === 'date' && (
+                                    <View style={styles.dateInputSection}>
+                                        <Text style={styles.label}>Дата выполнения</Text>
+                                        <Button
+                                            mode="outlined"
+                                            onPress={() => setShowNoteDatePicker(true)}
+                                            style={styles.customDateButton}
+                                            icon="calendar"
+                                        >
+                                            {formatDisplayDate(selectedNoteDate)}
+                                        </Button>
+                                    </View>
+                                )}
 
-                                    {showNoteDatePicker && (
-                                        <DateTimePicker
-                                            value={selectedNoteDate}
-                                            mode="date"
-                                            display="default"
-                                            onChange={onNoteDateChange}
-                                            minimumDate={new Date()}
-                                        />
-                                    )}
-                                </Card.Content>
-                                <Card.Actions style={styles.modalActions}>
-                                    <Button
-                                        mode="outlined"
-                                        onPress={() => setQuickNoteModalVisible(false)}
-                                        style={styles.modalButton}
-                                    >
-                                        Отмена
-                                    </Button>
-                                    <Button
-                                        mode="contained"
-                                        onPress={saveQuickNote}
-                                        style={styles.modalButton}
-                                        disabled={!quickNote.title.trim()}
-                                    >
-                                        Сохранить
-                                    </Button>
-                                </Card.Actions>
-                            </LinearGradient>
+                                {showNoteDatePicker && (
+                                    <DateTimePicker
+                                        value={selectedNoteDate}
+                                        mode="date"
+                                        display="default"
+                                        onChange={onNoteDateChange}
+                                        minimumDate={new Date()}
+                                    />
+                                )}
+                            </Card.Content>
+                            <Card.Actions style={styles.modalActions}>
+                                <Button
+                                    mode="outlined"
+                                    onPress={() => setQuickNoteModalVisible(false)}
+                                    style={styles.modalButton}
+                                >
+                                    Отмена
+                                </Button>
+                                <Button
+                                    mode="contained"
+                                    onPress={saveQuickNote}
+                                    style={styles.modalButton}
+                                    disabled={!quickNote.title.trim()}
+                                >
+                                    Сохранить
+                                </Button>
+                            </Card.Actions>
                         </Card>
                     </Modal>
                 </Portal>
@@ -563,187 +570,175 @@ const styles = StyleSheet.create({
         backgroundColor: '#F8FAFC',
     },
     headerGradient: {
-        paddingTop: 60,
-        paddingBottom: 20,
-        borderBottomLeftRadius: 24,
-        borderBottomRightRadius: 24,
+        paddingTop: 0,
+        paddingBottom: 14,
+        borderBottomLeftRadius: 20,
+        borderBottomRightRadius: 20,
+    },
+    groupContainer: {
+        alignItems: 'center',
+        marginBottom: 2,
+        paddingHorizontal: 16,
+    },
+    groupText: {
+        color: '#FFFFFF',
+        fontSize: 18,
+        fontWeight: '700',
+        opacity: 0.95,
     },
     dateHeader: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        paddingHorizontal: 20,
+        paddingHorizontal: 16,
+    },
+    navButton: {
+        margin: 0,
+        minWidth: 40,
     },
     dateInfo: {
         alignItems: 'center',
         flex: 1,
-        padding: 10,
-    },
-    dateDay: {
-        color: '#FFFFFF',
-        fontSize: 16,
-        fontWeight: '500',
-        opacity: 0.9,
+        paddingHorizontal: 8,
     },
     dateNumber: {
         color: '#FFFFFF',
-        fontSize: 24,
+        fontSize: 18,
         fontWeight: '700',
-        marginTop: 4,
-    },
-    dateHint: {
-        color: '#FFFFFF',
-        fontSize: 12,
-        opacity: 0.7,
-        marginTop: 4,
+        marginTop: 2,
     },
     content: {
         flex: 1,
-        padding: 20,
+        padding: 12,
+        backgroundColor: '#F8FAFC',
+        paddingBottom: 90, // ДОБАВЬТЕ ЭТУ СТРОКУ - отступ снизу для панели навигации
     },
     scheduleHeader: {
         flexDirection: 'row',
-        justifyContent: 'space-between',
+        justifyContent: 'center',
         alignItems: 'center',
-        marginBottom: 12,
+        marginBottom: 16,
+        position: 'relative',
     },
     sectionTitle: {
         fontSize: 20,
         fontWeight: '700',
         color: '#1E293B',
-    },
-    countChip: {
-        backgroundColor: '#FFFFFF',
-        borderColor: '#E2E8F0',
+        textAlign: 'center',
     },
     scheduleList: {
         paddingBottom: 20,
     },
     scheduleItemContainer: {
-        marginBottom: 12,
+        marginBottom: 8,
     },
     scheduleCard: {
-        borderRadius: 16,
+        borderRadius: 12,
+        backgroundColor: '#FFFFFF',
         elevation: 2,
         shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
+        shadowOffset: { width: 0, height: 1 },
         shadowOpacity: 0.1,
-        shadowRadius: 8,
+        shadowRadius: 4,
     },
-    cardGradient: {
-        borderRadius: 16,
+    cardContent: {
+        padding: 16,
     },
-    timeIndicator: {
+    lessonHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 12,
+    },
+    timeSection: {
         flexDirection: 'row',
         alignItems: 'center',
     },
-    timeDot: {
-        width: 8,
-        height: 8,
-        borderRadius: 4,
-        marginRight: 8,
-    },
     timeText: {
-        fontSize: 14,
+        fontSize: 15,
         fontWeight: '600',
         color: '#64748B',
     },
     typeChip: {
-        height: 32,
+        height: 28,
+        paddingVertical: 0,
     },
     subjectTitle: {
-        fontSize: 18,
+        fontSize: 16,
         fontWeight: '700',
         color: '#1E293B',
         marginBottom: 12,
-        lineHeight: 24,
+        lineHeight: 20,
+        textAlign: 'center',
     },
-    detailsGrid: {
+    detailsRow: {
         flexDirection: 'row',
         justifyContent: 'space-between',
-        marginBottom: 8,
-    },
-    detailItem: {
-        flexDirection: 'row',
         alignItems: 'center',
-        flex: 1,
+        marginTop: 8,
     },
-    detailIcon: {
-        backgroundColor: 'transparent',
-        marginRight: 8,
-    },
-    detailText: {
-        fontSize: 14,
+    teacherText: {
+        fontSize: 13,
         color: '#64748B',
+        fontWeight: '500',
         flex: 1,
     },
-    groupBadge: {
-        alignSelf: 'flex-start',
-        backgroundColor: '#F1F5F9',
-        paddingHorizontal: 8,
-        paddingVertical: 4,
-        borderRadius: 6,
-    },
-    groupText: {
-        fontSize: 12,
-        color: '#475569',
+    classroomText: {
+        fontSize: 13,
+        color: '#1E293B',
         fontWeight: '500',
     },
     separator: {
-        height: 12,
+        height: 8,
     },
     emptyState: {
         flex: 1,
         justifyContent: 'center',
         alignItems: 'center',
         padding: 40,
+        paddingBottom: 90, // ДОБАВЬТЕ ЭТУ СТРОКУ для пустого состояния
     },
     emptyIcon: {
-        backgroundColor: '#E2E8F0',
-        marginBottom: 20,
+        fontSize: 48,
+        marginBottom: 16,
     },
     emptyTitle: {
-        fontSize: 20,
+        fontSize: 18,
         fontWeight: '700',
         color: '#475569',
         marginBottom: 8,
         textAlign: 'center',
     },
     emptyText: {
-        fontSize: 16,
+        fontSize: 14,
         color: '#64748B',
         textAlign: 'center',
-        marginBottom: 24,
-        lineHeight: 22,
+        marginBottom: 20,
+        lineHeight: 20,
     },
     emptyButton: {
         borderColor: '#6366F1',
     },
-    fab: {
-        position: 'absolute',
-        margin: 16,
-        right: 0,
-        bottom: 0,
-        backgroundColor: '#6366F1',
-    },
     menuContent: {
         backgroundColor: '#FFFFFF',
         borderRadius: 12,
+        elevation: 8,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 8,
     },
     modalContainer: {
         margin: 20,
     },
     modalCard: {
-        borderRadius: 20,
-    },
-    modalGradient: {
-        borderRadius: 20,
+        borderRadius: 16,
     },
     modalTitle: {
         textAlign: 'center',
         marginBottom: 4,
         color: '#1E293B',
-        fontSize: 24,
+        fontSize: 20,
         fontWeight: '700',
     },
     modalSubtitle: {
@@ -760,7 +755,7 @@ const styles = StyleSheet.create({
         marginBottom: 16,
     },
     label: {
-        fontSize: 16,
+        fontSize: 14,
         fontWeight: '600',
         marginBottom: 8,
         color: '#1E293B',
@@ -772,16 +767,10 @@ const styles = StyleSheet.create({
     deadlineButton: {
         flex: 1,
     },
-    dateSection: {
+    dateInputSection: {
         marginBottom: 16,
     },
-    dateLabel: {
-        fontSize: 16,
-        fontWeight: '600',
-        marginBottom: 8,
-        color: '#1E293B',
-    },
-    dateButton: {
+    customDateButton: {
         borderColor: '#6366F1',
     },
     modalActions: {
@@ -791,6 +780,36 @@ const styles = StyleSheet.create({
     },
     modalButton: {
         minWidth: 100,
+    },
+    calendarModalContainer: {
+        margin: 20,
+        backgroundColor: 'transparent',
+    },
+    calendarCard: {
+        borderRadius: 16,
+        backgroundColor: '#FFFFFF',
+        elevation: 8,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.2,
+        shadowRadius: 8,
+    },
+    calendarHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 16,
+        paddingHorizontal: 8,
+    },
+    calendarTitle: {
+        color: '#1E293B',
+        fontSize: 18,
+        fontWeight: '700',
+    },
+    calendarPicker: {
+        height: 200,
+        backgroundColor: '#F8FAFC',
+        borderRadius: 12,
     },
 });
 

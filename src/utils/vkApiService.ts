@@ -226,53 +226,52 @@ class VKApiService {
         let importedCount = 0;
 
         try {
-            db.withTransactionSync(() => {
-                // Удаляем старые данные для тех же дат и группы
-                const datesToUpdate = [...new Set(scheduleItems.map(item =>
-                    item.date.toISOString().split('T')[0]
-                ))];
+            // ЗАМЕНИТЕ withTransactionSync на обычные вызовы
+            // Удаляем старые данные для тех же дат и группы
+            const datesToUpdate = [...new Set(scheduleItems.map(item =>
+                item.date.toISOString().split('T')[0]
+            ))];
 
-                console.log(`Updating dates: ${datesToUpdate.join(', ')}`);
+            console.log(`Updating dates: ${datesToUpdate.join(', ')}`);
 
-                datesToUpdate.forEach(date => {
-                    try {
-                        const deleted = db.runSync(
-                            'DELETE FROM schedule WHERE date LIKE ? AND student_group = ?',
-                            [`${date}%`, userGroup]
-                        );
-                        console.log(`Deleted old schedule for ${date}, group: ${userGroup}`);
-                    } catch (error) {
-                        console.log('Error deleting old schedule:', error);
-                    }
-                });
+            datesToUpdate.forEach(date => {
+                try {
+                    const deleted = db.runSync(
+                        'DELETE FROM schedule WHERE date LIKE ? AND student_group = ?',
+                        [`${date}%`, userGroup]
+                    );
+                    console.log(`Deleted old schedule for ${date}, group: ${userGroup}`);
+                } catch (error) {
+                    console.log('Error deleting old schedule:', error);
+                }
+            });
 
-                // Добавляем новые данные
-                scheduleItems.forEach(item => {
-                    try {
-                        db.runSync(
-                            `INSERT INTO schedule (subject, time, teacher, classroom, date, type, student_group) 
-                             VALUES (?, ?, ?, ?, ?, ?, ?);`,
-                            [
-                                item.subject,
-                                item.time,
-                                item.teacher,
-                                item.classroom,
-                                item.date.toISOString(),
-                                item.type,
-                                userGroup
-                            ]
-                        );
-                        importedCount++;
-                    } catch (error) {
-                        console.log('Error saving schedule item:', error);
-                    }
-                });
+            // Добавляем новые данные
+            scheduleItems.forEach(item => {
+                try {
+                    db.runSync(
+                        `INSERT OR REPLACE INTO schedule (subject, time, teacher, classroom, date, type, student_group) 
+                     VALUES (?, ?, ?, ?, ?, ?, ?);`,
+                        [
+                            item.subject,
+                            item.time,
+                            item.teacher,
+                            item.classroom,
+                            item.date.toISOString(),
+                            item.type,
+                            userGroup
+                        ]
+                    );
+                    importedCount++;
+                } catch (error) {
+                    console.log('Error saving schedule item:', error);
+                }
             });
 
             console.log(`✅ Imported ${importedCount} items from VK for group ${userGroup}`);
             return importedCount;
         } catch (error) {
-            console.log('Error in transaction:', error);
+            console.log('Error saving schedule to DB:', error);
             throw error;
         }
     }

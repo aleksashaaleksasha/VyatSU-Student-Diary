@@ -5,6 +5,8 @@ import { createStackNavigator } from '@react-navigation/stack';
 import { Provider as PaperProvider, MD3LightTheme, configureFonts } from 'react-native-paper';
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
+import { View } from 'react-native';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context'; // ДОБАВЬТЕ ЭТОТ ИМПОРТ
 import ScheduleScreen from './src/screens/ScheduleScreen';
 import NotesScreen from './src/screens/NotesScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
@@ -209,11 +211,6 @@ const SettingsStack = () => (
             options={{ title: 'Импорт расписания' }}
         />
         <Stack.Screen
-            name="GroupSelect"
-            component={GroupSelectScreen}
-            options={{ title: 'Выбор группы' }}
-        />
-        <Stack.Screen
             name="VkSchedule"
             component={VkScheduleScreen}
             options={{ title: 'Обновление из VK' }}
@@ -223,77 +220,101 @@ const SettingsStack = () => (
 
 export default function App() {
     return (
-        <PaperProvider theme={theme}>
-            <StatusBar style="auto" />
-            <NavigationContainer theme={navigationTheme}>
-                <Tab.Navigator
-                    screenOptions={({ route }) => ({
-                        tabBarIcon: ({ focused, color, size }) => {
-                            let iconName: any;
+        <SafeAreaProvider>
+            <PaperProvider theme={theme}>
+                <StatusBar style="auto" />
+                <NavigationContainer theme={navigationTheme}>
+                    <View style={{ flex: 1, backgroundColor: colorScheme.background }}>
+                        <Tab.Navigator
+                            screenOptions={({ route }) => ({
+                                tabBarIcon: ({ focused, color, size }) => {
+                                    let iconName: any;
 
-                            if (route.name === 'Расписание') {
-                                iconName = focused ? 'calendar' : 'calendar-outline';
-                            } else if (route.name === 'Заметки') {
-                                iconName = focused ? 'document-text' : 'document-text-outline';
-                            } else if (route.name === 'Настройки') {
-                                iconName = focused ? 'settings' : 'settings-outline';
-                            }
+                                    if (route.name === 'Расписание') {
+                                        iconName = focused ? 'calendar' : 'calendar-outline';
+                                    } else if (route.name === 'Заметки') {
+                                        iconName = focused ? 'document-text' : 'document-text-outline';
+                                    } else if (route.name === 'Настройки') {
+                                        iconName = focused ? 'settings' : 'settings-outline';
+                                    }
 
-                            return <Ionicons name={iconName} size={size} color={color} />;
-                        },
-                        tabBarActiveTintColor: colorScheme.primary,
-                        tabBarInactiveTintColor: '#64748B',
-                        tabBarStyle: {
-                            backgroundColor: colorScheme.surface,
-                            borderTopColor: colorScheme.outline,
-                            borderTopWidth: 1,
-                            height: 60,
-                            paddingBottom: 8,
-                            paddingTop: 8,
-                        },
-                        tabBarLabelStyle: {
-                            fontSize: 12,
-                            fontWeight: '500',
-                        },
-                        headerStyle: {
-                            backgroundColor: colorScheme.surface,
-                            elevation: 0,
-                            shadowOpacity: 0,
-                        },
-                        headerTintColor: colorScheme.primary,
-                        headerTitleStyle: {
-                            fontWeight: '700',
-                            fontSize: 20,
-                        },
-                        headerTitleAlign: 'center' as const,
-                    })}
-                >
-                    <Tab.Screen
-                        name="Расписание"
-                        component={ScheduleScreen}
-                        options={{
-                            title: 'Расписание',
-                            headerShown: true,
-                        }}
-                    />
-                    <Tab.Screen
-                        name="Заметки"
-                        component={NotesScreen}
-                        options={{
-                            title: 'Заметки',
-                            headerShown: true,
-                        }}
-                    />
-                    <Tab.Screen
-                        name="Настройки"
-                        component={SettingsStack}
-                        options={{
-                            title: 'Настройки',
-                            headerShown: false,
-                        }}
-                    />
-                </Tab.Navigator>
-            </NavigationContainer>
-        </PaperProvider>
+                                    return <Ionicons name={iconName} size={size} color={color} />;
+                                },
+                                tabBarActiveTintColor: colorScheme.primary,
+                                tabBarInactiveTintColor: '#64748B',
+                                tabBarStyle: {
+                                    backgroundColor: colorScheme.surface,
+                                    height: 60,
+                                    paddingBottom: 8,
+                                    paddingTop: 5,
+                                    paddingHorizontal: 20,
+                                    borderRadius: 30,
+                                    marginHorizontal: 16,
+                                    marginBottom: 40,
+                                    elevation: 12,
+                                    shadowColor: '#000',
+                                    shadowOffset: { width: 0, height: 4 },
+                                    shadowOpacity: 0.15,
+                                    shadowRadius: 12,
+                                    borderTopWidth: 0,
+                                    borderWidth: 0,
+                                    position: 'absolute',
+                                },
+                                tabBarLabelStyle: {
+                                    fontSize: 12,
+                                    fontWeight: '500',
+                                },
+                                headerStyle: {
+                                    backgroundColor: colorScheme.surface,
+                                    elevation: 0,
+                                    shadowOpacity: 0,
+                                },
+                                headerTintColor: colorScheme.primary,
+                                headerTitleStyle: {
+                                    fontWeight: '700',
+                                    fontSize: 20,
+                                },
+                                headerTitleAlign: 'center' as const,
+                            })}
+                        >
+                            <Tab.Screen
+                                name="Расписание"
+                                component={ScheduleScreen}
+                                options={{
+                                    title: 'Расписание',
+                                    headerShown: true,
+                                    headerStyle: {
+                                        backgroundColor: colorScheme.primary,
+                                        elevation: 0,
+                                        shadowOpacity: 0,
+                                    },
+                                    headerTintColor: '#FFFFFF',
+                                    headerTitleStyle: {
+                                        fontWeight: '700',
+                                        fontSize: 24,
+                                    },
+                                }}
+                            />
+                            <Tab.Screen
+                                name="Заметки"
+                                component={NotesScreen}
+                                options={{
+                                    title: 'Заметки',
+                                    headerShown: true,
+                                }}
+                            />
+                            <Tab.Screen
+                                name="Настройки"
+                                component={SettingsStack}
+                                options={{
+                                    title: 'Настройки',
+                                    headerShown: false,
+                                }}
+                            />
+                        </Tab.Navigator>
+                    </View>
+                </NavigationContainer>
+            </PaperProvider>
+        </SafeAreaProvider>
     );
 }

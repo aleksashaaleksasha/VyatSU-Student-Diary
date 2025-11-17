@@ -45,51 +45,49 @@ const ImportScreen: React.FC = () => {
         let importedCount = 0;
 
         try {
-            db.withTransactionSync(() => {
-                // УДАЛЯЕМ старые данные для тех же дат и группы перед добавлением новых
-                const datesToUpdate = [...new Set(scheduleItems.map(item =>
-                    item.date.toISOString().split('T')[0]
-                ))];
+            // УДАЛЯЕМ старые данные для тех же дат и группы перед добавлением новых
+            const datesToUpdate = [...new Set(scheduleItems.map(item =>
+                item.date.toISOString().split('T')[0]
+            ))];
 
-                datesToUpdate.forEach(date => {
-                    try {
-                        db.runSync(
-                            'DELETE FROM schedule WHERE date LIKE ? AND student_group = ?',
-                            [`${date}%`, userGroup]
-                        );
-                        console.log(`Deleted old schedule for ${date}, group: ${userGroup}`);
-                    } catch (error) {
-                        console.log('Error deleting old schedule:', error);
-                    }
-                });
+            datesToUpdate.forEach(date => {
+                try {
+                    db.runSync(
+                        'DELETE FROM schedule WHERE date LIKE ? AND student_group = ?',
+                        [`${date}%`, userGroup]
+                    );
+                    console.log(`Deleted old schedule for ${date}, group: ${userGroup}`);
+                } catch (error) {
+                    console.log('Error deleting old schedule:', error);
+                }
+            });
 
-                // Добавляем новые данные
-                scheduleItems.forEach(item => {
-                    try {
-                        db.runSync(
-                            `INSERT OR REPLACE INTO schedule (subject, time, teacher, classroom, date, type, student_group) 
-                         VALUES (?, ?, ?, ?, ?, ?, ?);`,
-                            [
-                                item.subject,
-                                item.time,
-                                item.teacher,
-                                item.classroom,
-                                item.date.toISOString(),
-                                item.type,
-                                item.group
-                            ]
-                        );
-                        importedCount++;
-                    } catch (error) {
-                        console.log('Error saving item:', error);
-                    }
-                });
+            // Добавляем новые данные
+            scheduleItems.forEach(item => {
+                try {
+                    db.runSync(
+                        `INSERT INTO schedule (subject, time, teacher, classroom, date, type, student_group) 
+                     VALUES (?, ?, ?, ?, ?, ?, ?);`,
+                        [
+                            item.subject,
+                            item.time,
+                            item.teacher,
+                            item.classroom,
+                            item.date.toISOString(),
+                            item.type,
+                            item.group
+                        ]
+                    );
+                    importedCount++;
+                } catch (error) {
+                    console.log('Error saving item:', error);
+                }
             });
 
             console.log(`Imported ${importedCount} items successfully`);
             return importedCount;
         } catch (error) {
-            console.log('Error in transaction:', error);
+            console.log('Error in database operation:', error);
             throw error;
         }
     };
