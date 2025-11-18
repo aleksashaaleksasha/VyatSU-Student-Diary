@@ -198,53 +198,20 @@ class DatabaseService {
     // Обработка INSERT для Web
     private handleInsertWeb(table: string, sql: string, params: any[]): DatabaseResult {
         const data = this.getWebStorage(table);
+        const newItem: any = {};
 
-        // Простой INSERT OR REPLACE
-        if (sql.includes('INSERT OR REPLACE')) {
-            const keyMatch = sql.match(/\(([^)]+)\)/);
-            if (keyMatch) {
-                const keys = keyMatch[1].split(',').map(k => k.trim());
-
-                // Находим PRIMARY KEY (обычно первое поле)
-                const primaryKey = keys[0];
-                const primaryKeyValue = params[0];
-
-                // Удаляем существующую запись
-                const existingIndex = data.findIndex(item => item[primaryKey] === primaryKeyValue);
-                if (existingIndex !== -1) {
-                    data.splice(existingIndex, 1);
-                }
-
-                // Создаем новую запись
-                const newItem: any = {};
-                keys.forEach((key, index) => {
-                    newItem[key] = params[index];
-                });
-
-                data.push(newItem);
-                this.setWebStorage(table, data);
-
-                return {
-                    rows: [newItem],
-                    insertId: data.length,
-                    rowsAffected: 1
-                };
-            }
-        }
-
-        // Обычный INSERT
+        // Заполняем данные из SQL запроса
         const keyMatch = sql.match(/\(([^)]+)\)/);
         if (keyMatch) {
             const keys = keyMatch[1].split(',').map(k => k.trim());
-            const newItem: any = {};
 
             keys.forEach((key, index) => {
                 newItem[key] = params[index];
             });
 
-            // Автоинкремент для id
-            if (!newItem.id && table !== 'settings') {
-                newItem.id = Date.now();
+            // ГАРАНТИРОВАННО создаем ID для веб-версии
+            if (!newItem.id) {
+                newItem.id = this.generateWebId(table, newItem);
             }
 
             data.push(newItem);
@@ -252,7 +219,7 @@ class DatabaseService {
 
             return {
                 rows: [newItem],
-                insertId: data.length,
+                insertId: newItem.id,
                 rowsAffected: 1
             };
         }
@@ -358,6 +325,31 @@ class DatabaseService {
         } catch (error) {
             console.error('Error writing to localStorage:', error);
         }
+    }
+
+    private generateWebId(table: string, data: any): string | number {
+        if (table === 'schedule') {
+            // Для расписания создаем уникальный ID на основе данных
+            const { subject, time, date, student_group } = data;
+            const dateStr = date instanceof Date ? date.toISOString() : date;
+
+            // Создаем хэш из данных предмета
+            const keyString = `${subject}-${time}-${dateStr}-${student_group}`;
+            return this.stringToHash(keyString);
+        }
+
+        // Для других таблиц используем timestamp
+        return Date.now();
+    }
+
+    private stringToHash(str: string): number {
+        let hash = 0;
+        for (let i = 0; i < str.length; i++) {
+            const char = str.charCodeAt(i);
+            hash = ((hash << 5) - hash) + char;
+            hash = hash & hash; // Convert to 32bit integer
+        }
+        return Math.abs(hash);
     }
 
     // Транзакции (упрощенная версия для Web)

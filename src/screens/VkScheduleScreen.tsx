@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, ScrollView, Alert, Linking } from 'react-native';
+import { View, StyleSheet, ScrollView, Alert, Linking, Platform } from 'react-native';
 import { Card, Title, Paragraph, Button, List, ActivityIndicator, Chip, Switch } from 'react-native-paper';
 import { vkApiService, ScheduleUpdateResult } from '../utils/vkApiService';
-import * as SQLite from 'expo-sqlite';
+import { db } from '../utils/databaseService';
 import { useIsFocused } from '@react-navigation/native';
 
-const db = SQLite.openDatabaseSync('student_diary.db');
+
 
 const VkScheduleScreen: React.FC = () => {
     const [checking, setChecking] = useState(false);
@@ -47,6 +47,8 @@ const VkScheduleScreen: React.FC = () => {
             loadUpdateHistory();
         }
     }, [isFocused]);
+
+
 
     const loadUserGroup = () => {
         try {
@@ -119,22 +121,27 @@ const VkScheduleScreen: React.FC = () => {
         }
     };
 
+    // В VkScheduleScreen.tsx обновите функцию checkForUpdates:
+
     const checkForUpdates = async () => {
-        console.log('Checking for updates, userGroup:', userGroup);
-        
-        // Детальная проверка состояния
-        if (!userGroup || userGroup === '' || userGroup === null || userGroup === undefined) {
-            console.log('User group is empty, showing alert');
+        console.log('🔍 РЕАЛЬНАЯ проверка обновлений...');
+        console.log(`Группа: ${userGroup}`);
+
+        if (!userGroup) {
             Alert.alert('Ошибка', 'Сначала выберите вашу группу в настройках');
             return;
         }
 
-        console.log('Starting update check for group:', userGroup);
+        console.log('Запуск реальной проверки обновлений...');
         setChecking(true);
 
         try {
-            const result = await vkApiService.checkForScheduleUpdates(userGroup);
-            console.log('Update check result:', result);
+            let result: ScheduleUpdateResult;
+
+            // ВСЕГДА используем реальную проверку
+            result = await vkApiService.checkForScheduleUpdates(userGroup);
+
+            console.log('Результат проверки:', result);
 
             saveUpdateHistory(result);
 
@@ -152,7 +159,7 @@ const VkScheduleScreen: React.FC = () => {
                 Alert.alert('Ошибка', result.error || 'Не удалось проверить обновления');
             }
         } catch (error) {
-            console.error('Update check error:', error);
+            console.error('Ошибка проверки обновлений:', error);
             Alert.alert('Ошибка', 'Произошла ошибка при проверке обновлений');
         } finally {
             setChecking(false);
@@ -334,6 +341,12 @@ const VkScheduleScreen: React.FC = () => {
                 <Card.Content>
                     <Title>Автообновление из VK</Title>
 
+                    {Platform.OS === 'web' && (
+                        <Chip mode="outlined" style={styles.demoChip} icon="information">
+                            Демонстрационный режим для Web
+                        </Chip>
+                    )}
+
                     {userGroup ? (
                         <Chip mode="outlined" style={styles.groupChip}>
                             Группа: {userGroup}
@@ -508,6 +521,12 @@ const styles = StyleSheet.create({
         textAlign: 'center',
         color: '#666',
         fontStyle: 'italic',
+    },
+    demoChip: {
+        alignSelf: 'flex-start',
+        marginBottom: 12,
+        backgroundColor: '#FFF3CD',
+        borderColor: '#FFEAA7',
     },
 });
 

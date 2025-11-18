@@ -1,12 +1,11 @@
 
 import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, ScrollView, Alert } from 'react-native';
+import { View, StyleSheet, ScrollView, Alert, Platform } from 'react-native';
 import { Card, Title, Paragraph, Button, List, ActivityIndicator, Chip } from 'react-native-paper';
 import { ExcelScheduleParser } from '../utils/excelParser';
-import * as SQLite from 'expo-sqlite';
+import { db } from '../utils/databaseService';
 import { useNavigation } from '@react-navigation/native';
 
-const db = SQLite.openDatabaseSync('student_diary.db');
 
 interface ScheduleItem {
     subject: string;
@@ -95,7 +94,15 @@ const ImportScreen: React.FC = () => {
     const handleImportFromFile = async () => {
         if (!userGroup) {
             Alert.alert('Ошибка', 'Сначала выберите вашу группу в настройках');
-            navigation.navigate('SettingsMain' as never);
+            return;
+        }
+
+        // Для Web используем альтернативный способ загрузки файлов
+        if (Platform.OS === 'web') {
+            Alert.alert(
+                'Веб-версия',
+                'В веб-версии используйте функцию обновления из VK или загрузите файл через мобильное приложение'
+            );
             return;
         }
 

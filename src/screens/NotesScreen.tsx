@@ -1,5 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, FlatList, Animated, Alert, TouchableOpacity } from 'react-native';
+import {
+    View,
+    StyleSheet,
+    FlatList,
+    Animated,
+    Alert,
+    TouchableOpacity,
+    ScrollView
+} from 'react-native';
 import {
     Card,
     Title,
@@ -20,11 +28,9 @@ import {
 import { format, isAfter, isToday, isTomorrow } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import * as SQLite from 'expo-sqlite';
+import { db } from '../utils/databaseService';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
-
-const db = SQLite.openDatabaseSync('student_diary.db');
 
 interface Note {
     id: string;
@@ -41,17 +47,15 @@ interface Note {
 
 const NotesScreen = () => {
     const [notes, setNotes] = useState<Note[]>([]);
-    const [filter, setFilter] = useState<'all' | 'active' | 'completed'>('all');
+    const [filter, setFilter] = useState<'all' | 'important' | 'overdue' | 'completed'>('all');
     const [visible, setVisible] = useState(false);
     const [showDatePicker, setShowDatePicker] = useState(false);
     const [selectedDate, setSelectedDate] = useState(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000));
     const [subjectMenuVisible, setSubjectMenuVisible] = useState(false);
-    const [deadlineTypeMenuVisible, setDeadlineTypeMenuVisible] = useState(false);
     const [scheduleSubjects, setScheduleSubjects] = useState<string[]>([]);
     const fadeAnim = useState(new Animated.Value(0))[0];
 
     const [newNote, setNewNote] = useState({
-        title: '',
         content: '',
         subject: '',
         deadlineType: 'none' as 'date' | 'next_class' | 'none'
@@ -72,16 +76,16 @@ const NotesScreen = () => {
         try {
             db.execSync(`
                 CREATE TABLE IF NOT EXISTS notes (
-                                                     id TEXT PRIMARY KEY,
-                                                     title TEXT NOT NULL,
-                                                     content TEXT NOT NULL,
-                                                     subject TEXT NOT NULL,
-                                                     deadline TEXT,
-                                                     deadlineType TEXT NOT NULL,
-                                                     createdAt TEXT NOT NULL,
-                                                     important INTEGER DEFAULT 0,
-                                                     completed INTEGER DEFAULT 0,
-                                                     nextClassDate TEXT
+                    id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    subject TEXT NOT NULL,
+                    deadline TEXT,
+                    deadlineType TEXT NOT NULL,
+                    createdAt TEXT NOT NULL,
+                    important INTEGER DEFAULT 0,
+                    completed INTEGER DEFAULT 0,
+                    nextClassDate TEXT
                 );
             `);
             console.log('Notes table checked/created');
@@ -142,7 +146,6 @@ const NotesScreen = () => {
         console.log('Closing modal...');
         setVisible(false);
         setNewNote({
-            title: '',
             content: '',
             subject: '',
             deadlineType: 'none'
@@ -155,18 +158,17 @@ const NotesScreen = () => {
         console.log('Add note clicked');
         console.log('Current note data:', newNote);
 
-        if (!newNote.title.trim()) {
-            Alert.alert('Ошибка', 'Введите заголовок заметки');
-            return;
-        }
         if (!newNote.content.trim()) {
             Alert.alert('Ошибка', 'Введите описание заметки');
             return;
         }
         if (!newNote.subject.trim()) {
-            Alert.alert('Ошибка', 'Введите предмет');
+            Alert.alert('Ошибка', 'Выберите предмет');
             return;
         }
+
+        // Автоматически создаем заголовок из предмета
+        const title = `${newNote.subject} - задание`;
 
         let deadline: string | undefined;
         let nextClassDate: string | undefined;
@@ -182,12 +184,14 @@ const NotesScreen = () => {
                 console.log('Using next class date:', deadline);
             } else {
                 console.log('No next class found for subject:', newNote.subject);
+                Alert.alert('Информация', 'Следующая пара по этому предмету не найдена');
+                return;
             }
         }
 
         const note: Note = {
             id: Date.now().toString(),
-            title: newNote.title.trim(),
+            title: title,
             content: newNote.content.trim(),
             subject: newNote.subject.trim(),
             deadline,
@@ -284,6 +288,23 @@ const NotesScreen = () => {
         );
     };
 
+    // ЦВЕТА КАК В РАСПИСАНИИ
+    const getSubjectColor = (subject: string) => {
+        const lowerSubject = subject.toLowerCase();
+        if (lowerSubject.includes('лекция') || lowerSubject.includes('лек.')) return '#6366F1';
+        if (lowerSubject.includes('практика') || lowerSubject.includes('пр.')) return '#10B981';
+        if (lowerSubject.includes('лабораторная') || lowerSubject.includes('лаб.')) return '#F59E0B';
+        if (lowerSubject.includes('семинар')) return '#EC4899';
+
+        // Цвет по умолчанию на основе хэша предмета для консистентности
+        const subjectHash = subject.split('').reduce((a, b) => {
+            a = ((a << 5) - a) + b.charCodeAt(0);
+            return a & a;
+        }, 0);
+        const colors = ['#6366F1', '#10B981', '#F59E0B', '#EC4899', '#8B5CF6', '#06B6D4'];
+        return colors[Math.abs(subjectHash) % colors.length];
+    };
+
     const getDeadlineColor = (deadline: string | undefined) => {
         if (!deadline) return '#64748B';
 
@@ -321,8 +342,15 @@ const NotesScreen = () => {
     const getFilteredNotes = () => {
         let filtered = [...notes];
 
-        if (filter === 'active') {
-            filtered = filtered.filter(note => !note.completed);
+        if (filter === 'important') {
+            filtered = filtered.filter(note => note.important && !note.completed);
+        } else if (filter === 'overdue') {
+            filtered = filtered.filter(note => {
+                if (!note.deadline || note.completed) return false;
+                const deadlineDate = new Date(note.deadline);
+                const today = new Date();
+                return isAfter(today, deadlineDate);
+            });
         } else if (filter === 'completed') {
             filtered = filtered.filter(note => note.completed);
         }
@@ -339,10 +367,6 @@ const NotesScreen = () => {
 
             return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
         });
-    };
-
-    const formatDisplayDate = (date: Date) => {
-        return format(date, 'd MMMM yyyy', { locale: ru });
     };
 
     const formatDisplayDateShort = (date: Date) => {
@@ -363,153 +387,131 @@ const NotesScreen = () => {
         setShowDatePicker(false);
     };
 
-    const confirmDate = () => {
-        setShowDatePicker(false);
+    const renderNote = ({ item, index }: { item: Note; index: number }) => {
+        const subjectColor = getSubjectColor(item.subject);
+
+        return (
+            <Animated.View
+                style={[
+                    styles.noteContainer,
+                    {
+                        opacity: fadeAnim,
+                        transform: [{
+                            translateY: fadeAnim.interpolate({
+                                inputRange: [0, 1],
+                                outputRange: [20 * (index + 1), 0],
+                            }),
+                        }],
+                    },
+                ]}
+            >
+                <Card style={[
+                    styles.noteCard,
+                    item.completed && styles.completedCard,
+                    item.important && styles.importantCard
+                ]}>
+                    <Card.Content style={styles.cardContent}>
+                        {/* Верхняя часть: Дедлайн слева, Важное справа */}
+                        <View style={styles.topRow}>
+                            {/* Дедлайн - слева сверху */}
+                            <Chip
+                                mode="flat"
+                                style={[
+                                    styles.deadlineChip,
+                                    {
+                                        backgroundColor: getDeadlineColor(item.deadline) + '20',
+                                        borderColor: getDeadlineColor(item.deadline) + '40',
+                                    }
+                                ]}
+                                textStyle={{
+                                    color: getDeadlineColor(item.deadline),
+                                    fontSize: 11,
+                                    fontWeight: '600'
+                                }}
+                            >
+                                {getDeadlineText(item)}
+                            </Chip>
+
+                            {/* Кнопка добавления в важное - справа сверху */}
+                            <TouchableOpacity
+                                style={[
+                                    styles.importantButton,
+                                    item.important && styles.importantButtonActive
+                                ]}
+                                onPress={() => toggleImportant(item.id)}
+                            >
+                                <IconButton
+                                    icon={item.important ? "star" : "star-outline"}
+                                    size={20}
+                                    iconColor={item.important ? "#F59E0B" : "#64748B"}
+                                    style={styles.actionIcon}
+                                />
+                            </TouchableOpacity>
+                        </View>
+
+                        {/* Центральная часть: Название предмета и описание */}
+                        <View style={styles.centerContent}>
+                            {/* Название предмета - посередине повыше */}
+                            <Text style={[
+                                styles.subjectTitle,
+                                item.completed && styles.completedText
+                            ]} numberOfLines={2}>
+                                {item.subject}
+                            </Text>
+
+                            {/* Описание заметки - посередине пониже */}
+                            <Text
+                                style={[styles.noteContent, item.completed && styles.completedText]}
+                                numberOfLines={3}
+                            >
+                                {item.content}
+                            </Text>
+                        </View>
+
+                        {/* Нижняя часть: Удалить слева, Выполнено справа */}
+                        <View style={styles.bottomRow}>
+                            {/* Кнопка удаления - слева снизу */}
+                            <TouchableOpacity
+                                style={[styles.deleteButton]}
+                                onPress={() => deleteNote(item.id)}
+                            >
+                                <IconButton
+                                    icon="delete-outline"
+                                    size={20}
+                                    iconColor="#EF4444"
+                                    style={styles.actionIcon}
+                                />
+                                <Text style={styles.deleteButtonText}>Удалить</Text>
+                            </TouchableOpacity>
+
+                            {/* Кнопка выполнения - справа снизу */}
+                            <TouchableOpacity
+                                style={[
+                                    styles.completeButton,
+                                    item.completed && styles.completeButtonActive
+                                ]}
+                                onPress={() => toggleCompleted(item.id)}
+                            >
+                                <IconButton
+                                    icon={item.completed ? "check-circle" : "checkbox-blank-circle-outline"}
+                                    size={20}
+                                    iconColor={item.completed ? "#10B981" : "#64748B"}
+                                    style={styles.actionIcon}
+                                />
+                                <Text style={styles.completeButtonText}>Готово</Text>
+                            </TouchableOpacity>
+                        </View>
+                    </Card.Content>
+                </Card>
+            </Animated.View>
+        );
     };
-
-    const renderNote = ({ item, index }: { item: Note; index: number }) => (
-        <Animated.View
-            style={[
-                styles.noteContainer,
-                {
-                    opacity: fadeAnim,
-                    transform: [{
-                        translateY: fadeAnim.interpolate({
-                            inputRange: [0, 1],
-                            outputRange: [20 * (index + 1), 0],
-                        }),
-                    }],
-                },
-            ]}
-        >
-            <Card style={[
-                styles.noteCard,
-                item.completed && styles.completedCard,
-                item.important && styles.importantCard
-            ]}>
-                <Card.Content style={styles.cardContent}>
-                    {/* Верхняя часть с предметом и дедлайном */}
-                    <View style={styles.noteHeader}>
-                        <Chip
-                            mode="flat"
-                            style={styles.subjectChip}
-                            textStyle={{ fontSize: 12, fontWeight: '600' }}
-                        >
-                            {item.subject}
-                        </Chip>
-
-                        <Chip
-                            mode="flat"
-                            style={[
-                                styles.deadlineChip,
-                                {
-                                    backgroundColor: getDeadlineColor(item.deadline) + '20',
-                                    borderColor: getDeadlineColor(item.deadline) + '40',
-                                }
-                            ]}
-                            textStyle={{
-                                color: getDeadlineColor(item.deadline),
-                                fontSize: 12,
-                                fontWeight: '600'
-                            }}
-                        >
-                            {getDeadlineText(item)}
-                        </Chip>
-                    </View>
-
-                    {/* Заголовок заметки */}
-                    <Text style={[
-                        styles.title,
-                        item.completed && styles.completedText
-                    ]} numberOfLines={2}>
-                        {item.title}
-                    </Text>
-
-                    {/* Описание заметки */}
-                    <Text
-                        style={[styles.noteContent, item.completed && styles.completedText]}
-                        numberOfLines={3}
-                    >
-                        {item.content}
-                    </Text>
-
-                    {/* Нижняя часть с красивыми кнопками действий */}
-                    <View style={styles.actionsContainer}>
-                        {/* Кнопка избранного - только иконка */}
-                        <TouchableOpacity
-                            style={[
-                                styles.actionButton,
-                                styles.favoriteButton,
-                                item.important && styles.favoriteButtonActive
-                            ]}
-                            onPress={() => toggleImportant(item.id)}
-                        >
-                            {item.important ? (
-                                <IconButton
-                                    icon="star"
-                                    size={20}
-                                    iconColor="#F59E0B"
-                                    style={styles.actionIcon}
-                                />
-                            ) : (
-                                <IconButton
-                                    icon="star-outline"
-                                    size={20}
-                                    iconColor="#64748B"
-                                    style={styles.actionIcon}
-                                />
-                            )}
-                        </TouchableOpacity>
-
-                        {/* Кнопка выполнения - только иконка */}
-                        <TouchableOpacity
-                            style={[
-                                styles.actionButton,
-                                styles.completeButton,
-                                item.completed && styles.completeButtonActive
-                            ]}
-                            onPress={() => toggleCompleted(item.id)}
-                        >
-                            {item.completed ? (
-                                <IconButton
-                                    icon="check-circle"
-                                    size={20}
-                                    iconColor="#10B981"
-                                    style={styles.actionIcon}
-                                />
-                            ) : (
-                                <IconButton
-                                    icon="checkbox-blank-circle-outline"
-                                    size={20}
-                                    iconColor="#64748B"
-                                    style={styles.actionIcon}
-                                />
-                            )}
-                        </TouchableOpacity>
-
-                        {/* Кнопка удаления - только иконка */}
-                        <TouchableOpacity
-                            style={[styles.actionButton, styles.deleteButton]}
-                            onPress={() => deleteNote(item.id)}
-                        >
-                            <IconButton
-                                icon="delete-outline"
-                                size={20}
-                                iconColor="#EF4444"
-                                style={styles.actionIcon}
-                            />
-                        </TouchableOpacity>
-                    </View>
-                </Card.Content>
-            </Card>
-        </Animated.View>
-    );
 
     return (
         <PaperProvider>
             <SafeAreaView style={styles.safeArea} edges={['top']}>
                 <View style={styles.container}>
-                    {/* Хедер с фильтрами - ОБНОВЛЕННЫЙ как в ScheduleScreen */}
+                    {/* Хедер с фильтрами */}
                     <LinearGradient
                         colors={['#EC4899', '#F472B6']}
                         style={styles.headerGradient}
@@ -520,34 +522,73 @@ const NotesScreen = () => {
                             </View>
                         </View>
 
-                        <SegmentedButtons
-                            value={filter}
-                            onValueChange={setFilter}
-                            buttons={[
-                                {
-                                    value: 'all',
-                                    label: 'Все',
-                                    style: {
-                                        backgroundColor: filter === 'all' ? '#FFFFFF20' : 'transparent',
-                                    },
-                                },
-                                {
-                                    value: 'active',
-                                    label: 'Активные',
-                                    style: {
-                                        backgroundColor: filter === 'active' ? '#FFFFFF20' : 'transparent',
-                                    },
-                                },
-                                {
-                                    value: 'completed',
-                                    label: 'Готово',
-                                    style: {
-                                        backgroundColor: filter === 'completed' ? '#FFFFFF20' : 'transparent',
-                                    },
-                                },
-                            ]}
-                            style={styles.segmentedButtons}
-                        />
+                        <View style={styles.filterScrollContainer}>
+                            <ScrollView
+                                horizontal
+                                showsHorizontalScrollIndicator={false}
+                                contentContainerStyle={styles.filterScrollContent}
+                            >
+                                <TouchableOpacity
+                                    style={[
+                                        styles.filterButton,
+                                        filter === 'all' && styles.filterButtonActive
+                                    ]}
+                                    onPress={() => setFilter('all')}
+                                >
+                                    <Text style={[
+                                        styles.filterButtonText,
+                                        filter === 'all' && styles.filterButtonTextActive
+                                    ]}>
+                                        Все
+                                    </Text>
+                                </TouchableOpacity>
+
+                                <TouchableOpacity
+                                    style={[
+                                        styles.filterButton,
+                                        filter === 'important' && styles.filterButtonActive
+                                    ]}
+                                    onPress={() => setFilter('important')}
+                                >
+                                    <Text style={[
+                                        styles.filterButtonText,
+                                        filter === 'important' && styles.filterButtonTextActive
+                                    ]}>
+                                        Важные
+                                    </Text>
+                                </TouchableOpacity>
+
+                                <TouchableOpacity
+                                    style={[
+                                        styles.filterButton,
+                                        filter === 'overdue' && styles.filterButtonActive
+                                    ]}
+                                    onPress={() => setFilter('overdue')}
+                                >
+                                    <Text style={[
+                                        styles.filterButtonText,
+                                        filter === 'overdue' && styles.filterButtonTextActive
+                                    ]}>
+                                        Просроченные
+                                    </Text>
+                                </TouchableOpacity>
+
+                                <TouchableOpacity
+                                    style={[
+                                        styles.filterButton,
+                                        filter === 'completed' && styles.filterButtonActive
+                                    ]}
+                                    onPress={() => setFilter('completed')}
+                                >
+                                    <Text style={[
+                                        styles.filterButtonText,
+                                        filter === 'completed' && styles.filterButtonTextActive
+                                    ]}>
+                                        Готовые
+                                    </Text>
+                                </TouchableOpacity>
+                            </ScrollView>
+                        </View>
                     </LinearGradient>
 
                     <View style={styles.content}>
@@ -564,7 +605,11 @@ const NotesScreen = () => {
                                 <Text style={styles.emptyText}>
                                     {filter === 'completed'
                                         ? 'Готовые заметки появятся здесь'
-                                        : 'Создайте первую заметку для отслеживания заданий'
+                                        : filter === 'important'
+                                            ? 'Важные заметки появятся здесь'
+                                            : filter === 'overdue'
+                                                ? 'Просроченные заметки появятся здесь'
+                                                : 'Создайте первую заметку для отслеживания заданий'
                                     }
                                 </Text>
                                 <Button
@@ -588,7 +633,7 @@ const NotesScreen = () => {
                         )}
                     </View>
 
-                    {/* FAB кнопка добавления - перенесена налево */}
+                    {/* FAB кнопка добавления */}
                     <FAB
                         icon="plus"
                         style={styles.fab}
@@ -596,7 +641,7 @@ const NotesScreen = () => {
                         color="#FFFFFF"
                     />
 
-                    {/* Модальное окно создания заметки */}
+                    {/* Модальное окно создания заметки - УПРОЩЕННОЕ */}
                     <Portal>
                         <Modal
                             visible={visible}
@@ -607,42 +652,59 @@ const NotesScreen = () => {
                                 <Card.Content>
                                     <Title style={styles.modalTitle}>Новая заметка</Title>
 
-                                    <TextInput
-                                        label="Заголовок *"
-                                        value={newNote.title}
-                                        onChangeText={(text) => setNewNote({...newNote, title: text})}
-                                        mode="outlined"
-                                        style={styles.input}
-                                        placeholder="Название задания"
-                                    />
+                                    {/* Предмет - выпадающий список */}
+                                    <View style={styles.inputSection}>
+                                        <Text style={styles.label}>Предмет *</Text>
+                                        <Menu
+                                            visible={subjectMenuVisible}
+                                            onDismiss={() => setSubjectMenuVisible(false)}
+                                            anchor={
+                                                <Button
+                                                    mode="outlined"
+                                                    onPress={() => setSubjectMenuVisible(true)}
+                                                    style={styles.selectButton}
+                                                    contentStyle={styles.selectButtonContent}
+                                                >
+                                                    {newNote.subject || 'Выберите предмет'}
+                                                </Button>
+                                            }
+                                        >
+                                            {scheduleSubjects.map((subject) => (
+                                                <Menu.Item
+                                                    key={subject}
+                                                    title={subject}
+                                                    onPress={() => {
+                                                        setNewNote({...newNote, subject});
+                                                        setSubjectMenuVisible(false);
+                                                    }}
+                                                />
+                                            ))}
+                                        </Menu>
+                                    </View>
 
-                                    <TextInput
-                                        label="Предмет *"
-                                        value={newNote.subject}
-                                        onChangeText={(text) => setNewNote({...newNote, subject: text})}
-                                        mode="outlined"
-                                        style={styles.input}
-                                        placeholder="Например: Математика"
-                                    />
+                                    {/* Описание */}
+                                    <View style={styles.inputSection}>
+                                        <Text style={styles.label}>Описание *</Text>
+                                        <TextInput
+                                            value={newNote.content}
+                                            onChangeText={(text) => setNewNote({...newNote, content: text})}
+                                            mode="outlined"
+                                            multiline
+                                            numberOfLines={3}
+                                            style={styles.input}
+                                            placeholder="Опишите задание..."
+                                        />
+                                    </View>
 
-                                    <TextInput
-                                        label="Описание *"
-                                        value={newNote.content}
-                                        onChangeText={(text) => setNewNote({...newNote, content: text})}
-                                        mode="outlined"
-                                        multiline
-                                        numberOfLines={3}
-                                        style={styles.input}
-                                        placeholder="Подробное описание задания"
-                                    />
-
-                                    <View style={styles.deadlineSection}>
+                                    {/* Дедлайн - упрощенный выбор */}
+                                    <View style={styles.inputSection}>
                                         <Text style={styles.label}>Дедлайн</Text>
                                         <View style={styles.deadlineButtons}>
                                             <Button
                                                 mode={newNote.deadlineType === 'none' ? "contained" : "outlined"}
                                                 onPress={() => setNewNote({...newNote, deadlineType: 'none'})}
                                                 style={styles.deadlineButton}
+                                                compact
                                             >
                                                 Без дедлайна
                                             </Button>
@@ -650,21 +712,27 @@ const NotesScreen = () => {
                                                 mode={newNote.deadlineType === 'next_class' ? "contained" : "outlined"}
                                                 onPress={() => setNewNote({...newNote, deadlineType: 'next_class'})}
                                                 style={styles.deadlineButton}
+                                                compact
                                             >
                                                 До след. пары
                                             </Button>
                                             <Button
                                                 mode={newNote.deadlineType === 'date' ? "contained" : "outlined"}
-                                                onPress={() => setNewNote({...newNote, deadlineType: 'date'})}
+                                                onPress={() => {
+                                                    setNewNote({...newNote, deadlineType: 'date'});
+                                                    setTimeout(() => setShowDatePicker(true), 100);
+                                                }}
                                                 style={styles.deadlineButton}
+                                                compact
                                             >
                                                 Конкретная дата
                                             </Button>
                                         </View>
                                     </View>
 
+                                    {/* Выбор даты, если выбран конкретный дедлайн */}
                                     {newNote.deadlineType === 'date' && (
-                                        <View style={styles.dateSection}>
+                                        <View style={styles.inputSection}>
                                             <Text style={styles.label}>Дата выполнения</Text>
                                             <View style={styles.dateInputRow}>
                                                 <TextInput
@@ -674,13 +742,6 @@ const NotesScreen = () => {
                                                     editable={false}
                                                     right={<TextInput.Icon icon="calendar" onPress={showDatePickerModal} />}
                                                 />
-                                                <Button
-                                                    mode="outlined"
-                                                    onPress={showDatePickerModal}
-                                                    style={styles.datePickerButton}
-                                                >
-                                                    Выбрать
-                                                </Button>
                                             </View>
                                         </View>
                                     )}
@@ -697,7 +758,7 @@ const NotesScreen = () => {
                                         mode="contained"
                                         onPress={addNote}
                                         style={styles.modalButton}
-                                        disabled={!newNote.title.trim() || !newNote.content.trim() || !newNote.subject.trim()}
+                                        disabled={!newNote.content.trim() || !newNote.subject.trim()}
                                     >
                                         Добавить
                                     </Button>
@@ -758,7 +819,6 @@ const styles = StyleSheet.create({
         flex: 1,
         backgroundColor: '#F8FAFC',
     },
-    // ОБНОВЛЕННЫЕ СТИЛИ HEADER как в ScheduleScreen
     headerGradient: {
         paddingTop: 8,
         paddingBottom: 16,
@@ -804,90 +864,121 @@ const styles = StyleSheet.create({
         shadowOffset: { width: 0, height: 2 },
         shadowOpacity: 0.1,
         shadowRadius: 8,
+        backgroundColor: '#FFFFFF',
     },
     cardContent: {
         padding: 16,
-        gap: 12,
+        gap: 16,
+        minHeight: 140,
     },
     completedCard: {
         opacity: 0.7,
+        backgroundColor: '#F8FAFC',
     },
     importantCard: {
         borderLeftWidth: 4,
         borderLeftColor: '#F59E0B',
     },
-    noteHeader: {
+    // Верхняя строка: дедлайн слева, важное справа
+    topRow: {
         flexDirection: 'row',
         justifyContent: 'space-between',
-        alignItems: 'center',
-        gap: 8,
-    },
-    subjectChip: {
-        backgroundColor: '#E0E7FF',
-        flex: 1,
+        alignItems: 'flex-start',
     },
     deadlineChip: {
         borderWidth: 1,
-        flexShrink: 0,
+        height: 28,
     },
-    title: {
+    importantButton: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: '#FFFBEB',
+        borderWidth: 1,
+        borderColor: '#FEF3C7',
+    },
+    importantButtonActive: {
+        backgroundColor: '#FEF3C7',
+        borderColor: '#F59E0B',
+    },
+    // Центральный контент: предмет и описание
+    centerContent: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+        gap: 8,
+        marginVertical: 8,
+    },
+    subjectTitle: {
         fontSize: 16,
         fontWeight: '700',
         color: '#1E293B',
+        textAlign: 'center',
         lineHeight: 20,
     },
     noteContent: {
         fontSize: 14,
         color: '#475569',
-        lineHeight: 20,
+        lineHeight: 18,
+        textAlign: 'center',
     },
     completedText: {
         textDecorationLine: 'line-through',
         color: '#94A3B8',
     },
-    // Новые стили для красивых кнопок действий
-    actionsContainer: {
+    // Нижняя строка: удалить слева, выполнено справа
+    bottomRow: {
         flexDirection: 'row',
-        justifyContent: 'flex-end',
-        alignItems: 'center',
+        justifyContent: 'space-between',
+        alignItems: 'flex-end',
         marginTop: 8,
-        gap: 8,
-    },
-    actionButton: {
-        width: 44,
-        height: 44,
-        borderRadius: 12,
-        borderWidth: 1,
-        alignItems: 'center',
-        justifyContent: 'center',
     },
     actionIcon: {
         margin: 0,
         width: 24,
         height: 24,
     },
-    // Стили для кнопки избранного
-    favoriteButton: {
-        borderColor: '#FEF3C7',
-        backgroundColor: '#FFFBEB',
-    },
-    favoriteButtonActive: {
-        borderColor: '#F59E0B',
-        backgroundColor: '#FEF3C7',
-    },
-    // Стили для кнопки выполнения
     completeButton: {
-        borderColor: '#D1FAE5',
+        width: 80,
+        height: 44,
+        borderRadius: 12,
+        alignItems: 'center',
+        justifyContent: 'center',
         backgroundColor: '#ECFDF5',
+        borderWidth: 1,
+        borderColor: '#D1FAE5',
+        paddingHorizontal: 8,
     },
     completeButtonActive: {
-        borderColor: '#10B981',
         backgroundColor: '#D1FAE5',
+        borderColor: '#10B981',
     },
-    // Стили для кнопки удаления
     deleteButton: {
-        borderColor: '#FEE2E2',
+        width: 80,
+        height: 44,
+        borderRadius: 12,
+        alignItems: 'center',
+        justifyContent: 'center',
         backgroundColor: '#FEF2F2',
+        borderWidth: 1,
+        borderColor: '#FEE2E2',
+        paddingHorizontal: 8,
+    },
+    completeButtonText: {
+        fontSize: 12,
+        fontWeight: '600',
+        color: '#10B981',
+        marginTop: 2,
+        textAlign: 'center',
+    },
+    deleteButtonText: {
+        fontSize: 12,
+        fontWeight: '600',
+        color: '#EF4444',
+        marginTop: 2,
+        textAlign: 'center',
     },
     separator: {
         height: 12,
@@ -920,12 +1011,12 @@ const styles = StyleSheet.create({
     emptyButton: {
         backgroundColor: '#EC4899',
     },
-    // FAB кнопка перенесена налево
     fab: {
         position: 'absolute',
         margin: 16,
         left: 0,
         bottom: 100,
+        backgroundColor: '#EC4899',
     },
     modalContainer: {
         margin: 20,
@@ -940,11 +1031,7 @@ const styles = StyleSheet.create({
         fontSize: 24,
         fontWeight: '700',
     },
-    input: {
-        marginBottom: 16,
-        backgroundColor: '#FFFFFF',
-    },
-    deadlineSection: {
+    inputSection: {
         marginBottom: 16,
     },
     label: {
@@ -953,15 +1040,24 @@ const styles = StyleSheet.create({
         marginBottom: 8,
         color: '#1E293B',
     },
+    selectButton: {
+        borderColor: '#E2E8F0',
+        backgroundColor: '#FFFFFF',
+    },
+    selectButtonContent: {
+        justifyContent: 'space-between',
+    },
+    input: {
+        backgroundColor: '#FFFFFF',
+    },
     deadlineButtons: {
         flexDirection: 'row',
         gap: 8,
+        flexWrap: 'wrap',
     },
     deadlineButton: {
         flex: 1,
-    },
-    dateSection: {
-        marginBottom: 16,
+        minWidth: 100,
     },
     dateInputRow: {
         flexDirection: 'row',
@@ -972,9 +1068,6 @@ const styles = StyleSheet.create({
         flex: 1,
         backgroundColor: '#FFFFFF',
     },
-    datePickerButton: {
-        minWidth: 100,
-    },
     modalActions: {
         justifyContent: 'space-between',
         paddingHorizontal: 16,
@@ -983,7 +1076,6 @@ const styles = StyleSheet.create({
     modalButton: {
         minWidth: 100,
     },
-    // Стили для модального окна выбора даты
     datePickerModalContainer: {
         margin: 20,
     },
@@ -1005,6 +1097,43 @@ const styles = StyleSheet.create({
     datePickerActions: {
         flexDirection: 'row',
         justifyContent: 'center',
+    },
+    datePickerButton: {
+        minWidth: 120,
+    },
+    filterScrollContainer: {
+        paddingHorizontal: 16,
+        paddingBottom: 12,
+    },
+    filterScrollContent: {
+        gap: 8,
+    },
+    filterButton: {
+        paddingHorizontal: 16,
+        paddingVertical: 8,
+        borderRadius: 20,
+        backgroundColor: '#FFFFFF20',
+        borderWidth: 1,
+        borderColor: '#FFFFFF40',
+        marginRight: 8,
+    },
+    filterButtonActive: {
+        backgroundColor: '#FFFFFF',
+        borderColor: '#FFFFFF',
+    },
+    filterButtonText: {
+        color: '#FFFFFF',
+        fontSize: 14,
+        fontWeight: '600',
+    },
+    filterButtonTextActive: {
+        color: '#EC4899',
+    },
+    buttonText: {
+        fontSize: 10,
+        fontWeight: '600',
+        marginTop: 2,
+        textAlign: 'center',
     },
 });
 

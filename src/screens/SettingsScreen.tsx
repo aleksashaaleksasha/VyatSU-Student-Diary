@@ -1,28 +1,47 @@
 import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, ScrollView, Alert } from 'react-native';
-import { Card, Title, Paragraph, Button, TextInput, Chip, Dialog, Portal } from 'react-native-paper';
+import {
+    View,
+    StyleSheet,
+    ScrollView,
+    Alert,
+    TouchableOpacity,
+    Text
+} from 'react-native';
+import { Card, Title, Paragraph, Button, TextInput, Modal, Portal, Chip } from 'react-native-paper';
 import { useNavigation } from '@react-navigation/native';
-import * as SQLite from 'expo-sqlite';
-
-const db = SQLite.openDatabaseSync('student_diary.db');
+import { db } from '../utils/databaseService';
+import { LinearGradient } from 'expo-linear-gradient';
+import { Ionicons } from '@expo/vector-icons';
 
 const SettingsScreen = () => {
     const [userGroup, setUserGroup] = useState('');
+    const [groupModalVisible, setGroupModalVisible] = useState(false);
     const [newGroup, setNewGroup] = useState('');
-    const [clearDialogVisible, setClearDialogVisible] = useState(false);
     const navigation = useNavigation();
 
-   useEffect(() => {
-    initDatabase(); // ДОБАВЬТЕ ЭТУ СТРОКУ
-    loadUserGroup();
-}, []);
+    useEffect(() => {
+        initDatabase();
+        loadUserGroup();
+    }, []);
+
+    const initDatabase = () => {
+        try {
+            db.execSync(`
+                CREATE TABLE IF NOT EXISTS settings (
+                                                        key TEXT PRIMARY KEY,
+                                                        value TEXT
+                );
+            `);
+        } catch (error) {
+            console.log('Error creating settings table:', error);
+        }
+    };
 
     const loadUserGroup = () => {
         try {
             const result = db.getFirstSync('SELECT value FROM settings WHERE key = "user_group"') as any;
             if (result) {
                 setUserGroup(result.value);
-                setNewGroup(result.value);
             }
         } catch (error) {
             console.log('Error loading user group:', error);
@@ -41,11 +60,23 @@ const SettingsScreen = () => {
                 ['user_group', newGroup.trim()]
             );
             setUserGroup(newGroup.trim());
+            setGroupModalVisible(false);
+            setNewGroup('');
             Alert.alert('Успех', 'Группа сохранена');
         } catch (error) {
             console.log('Error saving group:', error);
             Alert.alert('Ошибка', 'Не удалось сохранить группу');
         }
+    };
+
+    const showGroupModal = () => {
+        setNewGroup(userGroup || '');
+        setGroupModalVisible(true);
+    };
+
+    const hideGroupModal = () => {
+        setGroupModalVisible(false);
+        setNewGroup('');
     };
 
     const clearAllData = () => {
@@ -58,7 +89,6 @@ const SettingsScreen = () => {
             });
 
             Alert.alert('Успех', 'Все данные успешно очищены');
-            setClearDialogVisible(false);
             navigation.navigate('Расписание' as never);
 
         } catch (error) {
@@ -77,9 +107,7 @@ const SettingsScreen = () => {
             });
 
             setUserGroup('');
-            setNewGroup('');
             Alert.alert('Успех', 'Все данные успешно очищены, включая выбранную группу');
-            setClearDialogVisible(false);
             navigation.navigate('Расписание' as never);
 
         } catch (error) {
@@ -111,180 +139,328 @@ const SettingsScreen = () => {
         );
     };
 
-    const createBackup = () => {
-        try {
-            const scheduleData = db.getAllSync('SELECT * FROM schedule;') as any[];
-            const settingsData = db.getAllSync('SELECT * FROM settings;') as any[];
-            const updateHistoryData = db.getAllSync('SELECT * FROM update_history;') as any[];
-            const notesData = db.getAllSync('SELECT * FROM notes;') as any[];
-
-            const backup = {
-                schedule: scheduleData,
-                settings: settingsData,
-                updateHistory: updateHistoryData,
-                notes: notesData,
-                timestamp: new Date().toISOString(),
-                version: '1.0.0'
-            };
-
-            console.log('Backup created:', backup);
-
-            Alert.alert(
-                'Резервная копия',
-                `Создана резервная копия данных:\n- Расписание: ${scheduleData.length} записей\n- Настройки: ${settingsData.length} записей\n- История: ${updateHistoryData.length} записей\n- Заметки: ${notesData.length} записей`,
-                [{ text: 'OK' }]
-            );
-
-        } catch (error) {
-            console.log('Error creating backup:', error);
-            Alert.alert('Ошибка', 'Не удалось создать резервную копию');
-        }
-    };
-
-    const restoreFromBackup = () => {
-        Alert.alert(
-            'Восстановление',
-            'В текущей версии восстановление из резервной копии доступно только через переустановку приложения. Функция будет добавлена в будущих обновлениях.',
-            [{ text: 'OK' }]
-        );
-    };
-
     return (
-        <ScrollView style={styles.container}>
-            <Card style={styles.card}>
-                <Card.Content>
-                    <Title>Учебная группа</Title>
-                    <Paragraph>Введите вашу учебную группу для корректного отображения расписания</Paragraph>
+        <View style={styles.container}>
+            {/* Хедер с синим градиентом */}
+            <LinearGradient
+                colors={['#1E88E5', '#42A5F5']}
+                style={styles.headerGradient}
+            >
+                <View style={styles.headerTopRow}>
+                    <View style={styles.groupContainer}>
+                        {/* НАЗВАНИЕ ГРУППЫ ПО ЦЕНТРУ, ИКОНКА СПРАВА */}
+                        <TouchableOpacity
+                            style={styles.groupRow}
+                            onPress={showGroupModal}
+                        >
+                            <View style={styles.groupCenter}>
+                                {userGroup ? (
+                                    <Text style={styles.groupText}>{userGroup}</Text>
+                                ) : (
+                                    <Text style={styles.groupPlaceholder}>Выберите группу</Text>
+                                )}
+                                <Ionicons name="pencil" size={20} color="#FFFFFF" />
+                            </View>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </LinearGradient>
 
-                    {userGroup ? (
-                        <Chip mode="outlined" style={styles.groupChip}>
-                            Текущая группа: {userGroup}
-                        </Chip>
-                    ) : null}
+            <ScrollView
+                style={styles.scrollView}
+                contentContainerStyle={styles.scrollContent}
+                showsVerticalScrollIndicator={true}
+            >
+                <Card style={styles.card}>
+                    <Card.Content>
+                        <Title style={styles.cardTitle}>Импорт расписания</Title>
+                        <Paragraph style={styles.cardDescription}>Загрузите расписание из Excel файла</Paragraph>
 
-                    <TextInput
-                        label="Номер группы"
-                        value={newGroup}
-                        onChangeText={setNewGroup}
-                        mode="outlined"
-                        style={styles.input}
-                        placeholder="Например: ИСПк-104-52-00"
-                    />
+                        <Button
+                            mode="contained"
+                            icon="file-import"
+                            onPress={() => navigation.navigate('Import' as never)}
+                            style={styles.button}
+                            buttonColor="#1E88E5"
+                        >
+                            Импорт из Excel
+                        </Button>
+                    </Card.Content>
+                </Card>
 
-                    <Button
-                        mode="contained"
-                        icon="check"
-                        onPress={saveGroup}
-                        style={styles.button}
-                        disabled={!newGroup.trim()}
+                <Card style={styles.card}>
+                    <Card.Content>
+                        <Title style={styles.cardTitle}>Обновление из VK</Title>
+                        <Paragraph style={styles.cardDescription}>Автоматическая загрузка расписания из группы ВятГУ</Paragraph>
+
+                        <Button
+                            mode="contained"
+                            icon="refresh"
+                            onPress={() => navigation.navigate('VkSchedule' as never)}
+                            style={styles.button}
+                            buttonColor="#1E88E5"
+                        >
+                            Управление обновлениями
+                        </Button>
+                    </Card.Content>
+                </Card>
+
+                <Card style={styles.card}>
+                    <Card.Content>
+                        <Title style={styles.cardTitle}>Данные</Title>
+                        <Paragraph style={styles.cardDescription}>Управление данными приложения</Paragraph>
+                        <Button
+                            mode="outlined"
+                            style={[styles.button, styles.clearButton]}
+                            textColor="#EF4444"
+                            icon="delete"
+                            onPress={handleClearData}
+                        >
+                            Очистить все данные
+                        </Button>
+                    </Card.Content>
+                </Card>
+
+                <View style={styles.bottomSpacer} />
+            </ScrollView>
+
+            {/* МОДАЛЬНОЕ ОКНО ВЫБОРА ГРУППЫ */}
+            <Portal>
+                <Modal
+                    visible={groupModalVisible}
+                    onDismiss={hideGroupModal}
+                    contentContainerStyle={styles.modalContainer}
+                >
+                    <LinearGradient
+                        colors={['#1E88E5', '#42A5F5']}
+                        style={styles.modalGradient}
                     >
-                        Сохранить группу
-                    </Button>
-                </Card.Content>
-            </Card>
+                        <Card style={styles.modalCard}>
+                            <LinearGradient
+                                colors={['#1E88E5', '#42A5F5']}
+                                style={styles.modalHeader}
+                            >
+                                <View style={styles.modalHeaderContent}>
+                                    <Ionicons name="school" size={24} color="#FFFFFF" />
+                                    <Title style={styles.modalTitle}>Выбор группы</Title>
+                                </View>
+                            </LinearGradient>
 
-            <Card style={styles.card}>
-                <Card.Content>
-                    <Title>Импорт расписания</Title>
-                    <Paragraph>Загрузите расписание из Excel файла</Paragraph>
+                            <Card.Content style={styles.modalContent}>
+                                <View style={styles.currentGroupSection}>
+                                    <Text style={styles.currentGroupLabel}>Текущая группа:</Text>
+                                    {userGroup ? (
+                                        <Chip
+                                            mode="flat"
+                                            style={styles.currentGroupChip}
+                                            textStyle={styles.currentGroupChipText}
+                                        >
+                                            {userGroup}
+                                        </Chip>
+                                    ) : (
+                                        <Text style={styles.noGroupText}>Не выбрана</Text>
+                                    )}
+                                </View>
 
-                    <Button
-                        mode="contained"
-                        icon="file-import"
-                        onPress={() => navigation.navigate('Import' as never)}
-                        style={styles.button}
-                    >
-                        Импорт из Excel
-                    </Button>
-                </Card.Content>
-            </Card>
+                                <TextInput
+                                    label="Номер новой группы"
+                                    value={newGroup}
+                                    onChangeText={setNewGroup}
+                                    mode="outlined"
+                                    style={styles.input}
+                                    placeholder="Например: ИСПк-104-52-00"
+                                    autoFocus={true}
+                                    outlineColor="#1E88E5"
+                                    activeOutlineColor="#1565C0"
+                                    left={<TextInput.Icon icon="account-group" color="#1E88E5" />}
+                                />
+                            </Card.Content>
 
-            <Card style={styles.card}>
-                <Card.Content>
-                    <Title>Обновление из VK</Title>
-                    <Paragraph>Автоматическая загрузка расписания из группы ВятГУ</Paragraph>
-
-                    <Button
-                        mode="contained"
-                        icon="refresh" // ЗАМЕНИЛ НА refresh
-                        onPress={() => navigation.navigate('VkSchedule' as never)}
-                        style={styles.button}
-                    >
-                        Управление обновлениями
-                    </Button>
-                </Card.Content>
-            </Card>
-
-            <Card style={styles.card}>
-                <Card.Content>
-                    <Title>Данные</Title>
-                    <Button
-                        mode="outlined"
-                        style={styles.button}
-                        icon="content-save"
-                        onPress={createBackup}
-                    >
-                        Создать резервную копию
-                    </Button>
-                    <Button
-                        mode="outlined"
-                        style={styles.button}
-                        icon="backup-restore"
-                        onPress={restoreFromBackup}
-                    >
-                        Восстановить из копии
-                    </Button>
-                    <Button
-                        mode="outlined"
-                        style={styles.button}
-                        textColor="red"
-                        icon="delete"
-                        onPress={handleClearData}
-                    >
-                        Очистить все данные
-                    </Button>
-                </Card.Content>
-            </Card>
-        </ScrollView>
+                            <Card.Actions style={styles.modalActions}>
+                                <Button
+                                    mode="outlined"
+                                    onPress={hideGroupModal}
+                                    style={styles.modalButton}
+                                    textColor="#1E88E5"
+                                    icon="close"
+                                >
+                                    Отмена
+                                </Button>
+                                <Button
+                                    mode="contained"
+                                    onPress={saveGroup}
+                                    style={styles.modalButton}
+                                    disabled={!newGroup.trim()}
+                                    buttonColor="#1E88E5"
+                                    icon="check"
+                                >
+                                    Сохранить
+                                </Button>
+                            </Card.Actions>
+                        </Card>
+                    </LinearGradient>
+                </Modal>
+            </Portal>
+        </View>
     );
-};
-
-const initDatabase = () => {
-    try {
-        db.execSync(`
-            CREATE TABLE IF NOT EXISTS settings (
-                key TEXT PRIMARY KEY,
-                value TEXT
-            );
-        `);
-    } catch (error) {
-        console.log('Error creating settings table:', error);
-    }
 };
 
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        padding: 16,
         backgroundColor: '#f8f9fa',
-        paddingBottom: 90,
+    },
+    headerGradient: {
+        paddingTop: 0,
+        paddingBottom: 12,
+        borderBottomLeftRadius: 20,
+        borderBottomRightRadius: 20,
+    },
+    headerTopRow: {
+        flexDirection: 'row',
+        justifyContent: 'center',
+        alignItems: 'center',
+        paddingHorizontal: 16,
+        paddingTop: 10,
+        paddingBottom: 10,
+    },
+    groupContainer: {
+        alignItems: 'center',
+        width: '100%',
+    },
+    // НАЗВАНИЕ ГРУППЫ ПО ЦЕНТРУ, ИКОНКА СПРАВА
+    groupRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: '100%',
+    },
+    groupCenter: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+    },
+    groupText: {
+        color: '#FFFFFF',
+        fontSize: 20,
+        fontWeight: '700',
+    },
+    groupPlaceholder: {
+        color: '#FFFFFF',
+        fontSize: 18,
+        fontWeight: '600',
+        opacity: 0.9,
+    },
+    editButton: {
+        padding: 4,
+    },
+    scrollView: {
+        flex: 1,
+    },
+    scrollContent: {
+        padding: 16,
+        paddingTop: 20,
+        paddingBottom: 80,
     },
     card: {
         marginBottom: 16,
+        borderRadius: 16,
+        elevation: 2,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 8,
+    },
+    cardTitle: {
+        fontSize: 18,
+        fontWeight: '700',
+        color: '#1E293B',
+        marginBottom: 8,
+    },
+    cardDescription: {
+        fontSize: 14,
+        color: '#64748B',
+        marginBottom: 16,
+        lineHeight: 20,
     },
     button: {
         marginVertical: 4,
     },
+    clearButton: {
+        borderColor: '#EF4444',
+    },
+    bottomSpacer: {
+        height: 40,
+    },
+    // СТИЛИ ДЛЯ МОДАЛЬНОГО ОКНА
+    modalContainer: {
+        margin: 20,
+        borderRadius: 20,
+        overflow: 'hidden',
+    },
+    modalGradient: {
+        borderRadius: 20,
+    },
+    modalCard: {
+        borderRadius: 20,
+        backgroundColor: '#FFFFFF',
+        margin: 2,
+    },
+    modalHeader: {
+        padding: 20,
+        borderTopLeftRadius: 18,
+        borderTopRightRadius: 18,
+    },
+    modalHeaderContent: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 12,
+    },
+    modalTitle: {
+        color: '#FFFFFF',
+        fontSize: 20,
+        fontWeight: '700',
+    },
+    modalContent: {
+        padding: 20,
+        gap: 16,
+    },
+    currentGroupSection: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+    },
+    currentGroupLabel: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: '#64748B',
+    },
+    currentGroupChip: {
+        backgroundColor: '#E3F2FD',
+    },
+    currentGroupChipText: {
+        color: '#1E88E5',
+        fontWeight: '600',
+    },
+    noGroupText: {
+        fontSize: 14,
+        color: '#EF4444',
+        fontStyle: 'italic',
+    },
     input: {
-        marginBottom: 12,
         backgroundColor: '#FFFFFF',
     },
-    groupChip: {
-        alignSelf: 'flex-start',
-        marginBottom: 12,
+    modalActions: {
+        justifyContent: 'space-between',
+        paddingHorizontal: 16,
+        paddingBottom: 16,
+        gap: 8,
+    },
+    modalButton: {
+        flex: 1,
+        minWidth: 120,
     },
 });
-
-
 
 export default SettingsScreen;

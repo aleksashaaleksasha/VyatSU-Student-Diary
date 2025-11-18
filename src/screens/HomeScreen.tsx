@@ -1,38 +1,14 @@
+// HomeScreen.tsx
 import React, { useState } from 'react';
 import { View, StyleSheet, ScrollView, Dimensions } from 'react-native';
 import { Card, Title, Text, FAB } from 'react-native-paper';
 import { format, addDays, subDays, eachDayOfInterval, startOfWeek, endOfWeek } from 'date-fns';
 import { ru } from 'date-fns/locale';
-//1
+
 const { width } = Dimensions.get('window');
 
 const ScheduleScreen = () => {
     const [currentDate, setCurrentDate] = useState(new Date());
-
-
-    const generateScheduleData = () => {
-        const weekStart = startOfWeek(currentDate, { weekStartsOn: 1 });
-        const weekDays = eachDayOfInterval({
-            start: weekStart,
-            end: endOfWeek(currentDate, { weekStartsOn: 1 })
-        });
-
-        const schedule: any = {};
-
-        weekDays.forEach(day => {
-            const dayKey = format(day, 'yyyy-MM-dd');
-            schedule[dayKey] = [
-                { time: '09:00-10:30', subject: 'Математика', type: 'lecture', room: '301', teacher: 'Иванов А.И.' },
-                { time: '10:40-12:10', subject: 'Программирование', type: 'lab', room: '415', teacher: 'Петров С.В.' },
-                { time: '13:00-14:30', subject: 'Физика', type: 'practice', room: '210', teacher: 'Сидорова М.К.' },
-            ].filter((_, index) => day.getDay() !== 0 && day.getDay() !== 6);
-        });
-
-        return schedule;
-    };
-
-    const scheduleData = generateScheduleData();
-    const currentDayKey = format(currentDate, 'yyyy-MM-dd');
 
     const handleSwipe = (direction: 'left' | 'right') => {
         if (direction === 'left') {
@@ -91,33 +67,12 @@ const ScheduleScreen = () => {
                 <View style={{ width }}>
                     <Card style={styles.scheduleCard}>
                         <Card.Content>
-                            {scheduleData[currentDayKey] && scheduleData[currentDayKey].length > 0 ? (
-                                scheduleData[currentDayKey].map((lesson: any, index: number) => (
-                                    <View key={index} style={styles.lessonItem}>
-                                        <View style={styles.lessonHeader}>
-                                            <Text style={styles.timeText}>{lesson.time}</Text>
-                                            <View
-                                                style={[
-                                                    styles.typeBadge,
-                                                    { backgroundColor: getTypeColor(lesson.type) }
-                                                ]}
-                                            >
-                                                <Text style={styles.typeText}>
-                                                    {getTypeText(lesson.type)}
-                                                </Text>
-                                            </View>
-                                        </View>
-                                        <Text style={styles.subjectText}>{lesson.subject}</Text>
-                                        <Text style={styles.detailsText}>
-                                            {lesson.teacher} • ауд. {lesson.room}
-                                        </Text>
-                                    </View>
-                                ))
-                            ) : (
-                                <View style={styles.noClasses}>
-                                    <Text style={styles.noClassesText}>Пар нет 🎉</Text>
-                                </View>
-                            )}
+                            <View style={styles.noClasses}>
+                                <Text style={styles.noClassesText}>Данные загружаются из Excel или VK</Text>
+                                <Text style={styles.noClassesSubtext}>
+                                    Используйте импорт из Excel или обновление из VK для загрузки расписания
+                                </Text>
+                            </View>
                         </Card.Content>
                     </Card>
                 </View>
@@ -207,6 +162,14 @@ const styles = StyleSheet.create({
         fontSize: 18,
         color: '#666',
         fontWeight: '500',
+        textAlign: 'center',
+        marginBottom: 8,
+    },
+    noClassesSubtext: {
+        fontSize: 14,
+        color: '#999',
+        textAlign: 'center',
+        lineHeight: 20,
     },
     navigationHint: {
         padding: 16,

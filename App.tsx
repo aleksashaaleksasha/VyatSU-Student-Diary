@@ -2,23 +2,28 @@ import React, { useState } from 'react';
 import { NavigationContainer, DefaultTheme as NavigationDefaultTheme } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createStackNavigator } from '@react-navigation/stack';
-import { Provider as PaperProvider, MD3LightTheme, configureFonts, Appbar } from 'react-native-paper';
+import { Provider as PaperProvider, MD3LightTheme, configureFonts } from 'react-native-paper';
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
-import { View, Alert, Text, TouchableOpacity } from 'react-native';
+import { View, Alert, Text, TouchableOpacity, Platform } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import ScheduleScreen from './src/screens/ScheduleScreen';
 import NotesScreen from './src/screens/NotesScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
 import ImportScreen from './src/screens/ImportScreen';
-import GroupSelectScreen from './src/screens/GroupSelectScreen';
 import VkScheduleScreen from './src/screens/VkScheduleScreen';
 import { vkApiService, ScheduleUpdateResult } from './src/utils/vkApiService';
-import * as SQLite from 'expo-sqlite';
+import { db } from './src/utils/databaseService';
 
-const db = SQLite.openDatabaseSync('student_diary.db');
 const Tab = createBottomTabNavigator();
 const Stack = createStackNavigator();
+
+// ЕДИНЫЕ СТИЛИ ДЛЯ ЗАГОЛОВКОВ
+const HEADER_TITLE_STYLE = {
+    fontSize: 20,
+    fontWeight: '700' as const,
+    color: '#FFFFFF',
+};
 
 // Кастомная цветовая схема
 const colorScheme = {
@@ -189,14 +194,13 @@ const SettingsStack = () => (
     <Stack.Navigator
         screenOptions={{
             headerStyle: {
-                backgroundColor: colorScheme.surface,
+                backgroundColor: '#1E88E5',
                 elevation: 0,
                 shadowOpacity: 0,
             },
-            headerTintColor: colorScheme.primary,
-            headerTitleStyle: {
-                fontWeight: '600',
-            },
+            headerTintColor: '#FFFFFF',
+            headerTitleStyle: HEADER_TITLE_STYLE, // ЕДИНЫЙ СТИЛЬ
+            headerTitleAlign: 'center' as const,
             cardStyle: {
                 backgroundColor: colorScheme.background,
             },
@@ -210,21 +214,34 @@ const SettingsStack = () => (
         <Stack.Screen
             name="Import"
             component={ImportScreen}
-            options={{ title: 'Импорт расписания' }}
+            options={{
+                title: 'Импорт расписания',
+                headerStyle: {
+                    backgroundColor: '#1E88E5',
+                    elevation: 0,
+                    shadowOpacity: 0,
+                },
+            }}
         />
         <Stack.Screen
             name="VkSchedule"
             component={VkScheduleScreen}
-            options={{ title: 'Обновление из VK' }}
+            options={{
+                title: 'Обновление из VK',
+                headerStyle: {
+                    backgroundColor: '#1E88E5',
+                    elevation: 0,
+                    shadowOpacity: 0,
+                },
+            }}
         />
     </Stack.Navigator>
 );
 
-// Кастомный хедер для экрана расписания с кнопкой обновления
-// ЗАМЕНИТЕ компонент ScheduleHeader в App.tsx на этот:
+// Кастомный хедер для экрана расписания
 const ScheduleHeader = ({ onRefresh, refreshing }: { onRefresh: () => void; refreshing: boolean }) => {
     return (
-        <SafeAreaView style={{ backgroundColor: colorScheme.primary }}>
+        <SafeAreaView style={{ backgroundColor: colorScheme.primary }} edges={['top']}>
             <View style={{
                 backgroundColor: colorScheme.primary,
                 height: 46,
@@ -232,17 +249,14 @@ const ScheduleHeader = ({ onRefresh, refreshing }: { onRefresh: () => void; refr
                 alignItems: 'center',
                 justifyContent: 'center',
                 paddingHorizontal: 16,
-                paddingTop: 0, // УБЕРИТЕ лишние отступы
+                paddingTop: 0,
             }}>
-                {/* Заголовок по центру */}
-                <Text style={{
-                    color: '#FFFFFF',
-                    fontSize: 20,
-                    fontWeight: '700',
+                {/* Заголовок по центру с ЕДИНЫМ СТИЛЕМ */}
+                <Text style={[HEADER_TITLE_STYLE, {
                     flex: 1,
                     textAlign: 'center',
-                    marginTop: 0, // УБЕРИТЕ margin
-                }}>
+                    marginTop: 0,
+                }]}>
                     Расписание
                 </Text>
 
@@ -254,7 +268,7 @@ const ScheduleHeader = ({ onRefresh, refreshing }: { onRefresh: () => void; refr
                         padding: 8,
                         position: 'absolute',
                         right: 16,
-                        top: 8, // ДОБАВЬТЕ top для правильного позиционирования
+                        top: 8,
                     }}
                 >
                     <Ionicons
@@ -270,6 +284,7 @@ const ScheduleHeader = ({ onRefresh, refreshing }: { onRefresh: () => void; refr
 
 export default function App() {
     const [refreshingSchedule, setRefreshingSchedule] = useState(false);
+    const [refreshTrigger, setRefreshTrigger] = useState(0);
 
     // Функция для проверки обновлений из VK
     const checkVkUpdates = async () => {
@@ -285,14 +300,15 @@ export default function App() {
 
             setRefreshingSchedule(true);
 
-            console.log('🔄 Checking for VK updates from App header...');
+            console.log('🔄 Проверка обновлений из VK...');
 
+            // ВСЕГДА используем реальную проверку обновлений
             const result = await vkApiService.checkForScheduleUpdates(userGroup);
 
             // Сохраняем историю обновлений
             if (result.success) {
                 db.runSync(
-                    `INSERT INTO update_history (timestamp, new_items_count, success, error_message) 
+                    `INSERT INTO update_history (timestamp, new_items_count, success, error_message)
                      VALUES (?, ?, ?, ?)`,
                     [new Date().toISOString(), result.newScheduleCount, result.success ? 1 : 0, result.error || '']
                 );
@@ -303,7 +319,9 @@ export default function App() {
                     ['last_vk_update', result.lastUpdate.toISOString()]
                 );
 
+                // ДОБАВЛЕНО: Триггерим обновление данных в ScheduleScreen
                 if (result.newScheduleCount > 0) {
+                    setRefreshTrigger(prev => prev + 1);
                     Alert.alert(
                         'Успех',
                         `Обновлено ${result.newScheduleCount} занятий для группы "${userGroup}"`
@@ -332,19 +350,43 @@ export default function App() {
                             screenOptions={({ route }) => ({
                                 tabBarIcon: ({ focused, color, size }) => {
                                     let iconName: any;
+                                    let iconColor = '#64748B'; // значение по умолчанию
 
                                     if (route.name === 'Расписание') {
                                         iconName = focused ? 'calendar' : 'calendar-outline';
+                                        iconColor = focused ? '#6366F1' : '#64748B';
                                     } else if (route.name === 'Заметки') {
                                         iconName = focused ? 'document-text' : 'document-text-outline';
+                                        iconColor = focused ? '#EC4899' : '#64748B';
                                     } else if (route.name === 'Настройки') {
                                         iconName = focused ? 'settings' : 'settings-outline';
+                                        iconColor = focused ? '#1E88E5' : '#64748B';
                                     }
 
-                                    return <Ionicons name={iconName} size={size} color={color} />;
+                                    return <Ionicons name={iconName} size={size} color={iconColor} />;
                                 },
-                                tabBarActiveTintColor: colorScheme.primary,
-                                tabBarInactiveTintColor: '#64748B',
+                                tabBarLabel: ({ focused, color, position, children }) => {
+                                    let labelColor = '#64748B'; // значение по умолчанию
+
+                                    if (route.name === 'Расписание') {
+                                        labelColor = focused ? '#6366F1' : '#64748B';
+                                    } else if (route.name === 'Заметки') {
+                                        labelColor = focused ? '#EC4899' : '#64748B';
+                                    } else if (route.name === 'Настройки') {
+                                        labelColor = focused ? '#1E88E5' : '#64748B';
+                                    }
+
+                                    return (
+                                        <Text style={{
+                                            fontSize: 12,
+                                            fontWeight: '500',
+                                            color: labelColor,
+                                            marginTop: -4
+                                        }}>
+                                            {children}
+                                        </Text>
+                                    );
+                                },
                                 tabBarStyle: {
                                     backgroundColor: colorScheme.surface,
                                     height: 60,
@@ -353,7 +395,7 @@ export default function App() {
                                     paddingHorizontal: 20,
                                     borderRadius: 30,
                                     marginHorizontal: 16,
-                                    marginBottom: 40,
+                                    marginBottom: Platform.OS === 'web' ? 16 : 40,
                                     elevation: 12,
                                     shadowColor: '#000',
                                     shadowOffset: { width: 0, height: 4 },
@@ -361,11 +403,7 @@ export default function App() {
                                     shadowRadius: 12,
                                     borderTopWidth: 0,
                                     borderWidth: 0,
-                                    position: 'absolute',
-                                },
-                                tabBarLabelStyle: {
-                                    fontSize: 12,
-                                    fontWeight: '500',
+                                    position: Platform.OS === 'web' ? 'relative' : 'absolute',
                                 },
                                 headerStyle: {
                                     backgroundColor: colorScheme.surface,
@@ -373,34 +411,30 @@ export default function App() {
                                     shadowOpacity: 0,
                                 },
                                 headerTintColor: colorScheme.primary,
-                                headerTitleStyle: {
-                                    fontWeight: '700',
-                                    fontSize: 20,
-                                },
+                                headerTitleStyle: HEADER_TITLE_STYLE,
                                 headerTitleAlign: 'center' as const,
                             })}
                         >
+                            {/* Остальной код Tab.Screen без изменений */}
                             <Tab.Screen
                                 name="Расписание"
                                 children={() => (
                                     <ScheduleScreen
                                         onRefreshPress={checkVkUpdates}
                                         refreshing={refreshingSchedule}
+                                        refreshTrigger={refreshTrigger}
                                     />
                                 )}
                                 options={{
                                     title: 'Расписание',
                                     headerShown: true,
                                     headerStyle: {
-                                        backgroundColor: colorScheme.primary,
+                                        backgroundColor: '#6366F1',
                                         elevation: 0,
                                         shadowOpacity: 0,
                                     },
                                     headerTintColor: '#FFFFFF',
-                                    headerTitleStyle: {
-                                        fontWeight: '700',
-                                        fontSize: 20,
-                                    },
+                                    headerTitleStyle: HEADER_TITLE_STYLE,
                                     headerRight: () => (
                                         <TouchableOpacity
                                             onPress={checkVkUpdates}

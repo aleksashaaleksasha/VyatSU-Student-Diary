@@ -16,17 +16,15 @@ import {
     IconButton,
     ActivityIndicator,
 } from 'react-native-paper';
-import { format, isAfter, isToday, isSameDay, addDays, subDays } from 'date-fns';
+import { format, isAfter, isToday, isSameDay, addDays, subDays, isValid } from 'date-fns';
 import { ru } from 'date-fns/locale';
-import * as SQLite from 'expo-sqlite';
+import { db } from '../utils/databaseService';
 import { useIsFocused, useNavigation } from '@react-navigation/native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { LinearGradient } from 'expo-linear-gradient';
 import { vkApiService, ScheduleUpdateResult } from '../utils/vkApiService';
 
 const { width } = Dimensions.get('window');
-
-const db = SQLite.openDatabaseSync('student_diary.db');
 
 interface ScheduleItem {
     id: number;
@@ -40,11 +38,16 @@ interface ScheduleItem {
 }
 
 interface ScheduleScreenProps {
-    onRefreshPress?: () => void; // ДОБАВЛЕНО: callback для кнопки обновления
-    refreshing?: boolean; // ДОБАВЛЕНО: состояние обновления извне
+    onRefreshPress?: () => void;
+    refreshing?: boolean;
+    refreshTrigger?: number; // ДОБАВЛЕНО: триггер для обновления
 }
 
-const ScheduleScreen: React.FC<ScheduleScreenProps> = ({ onRefreshPress, refreshing = false }) => { // ИЗМЕНЕНО: добавлены props
+const ScheduleScreen: React.FC<ScheduleScreenProps> = ({
+                                                           onRefreshPress,
+                                                           refreshing = false,
+                                                           refreshTrigger = 0 // ДОБАВЛЕНО: триггер по умолчанию
+                                                       }) => {
     const [selectedDate, setSelectedDate] = useState(new Date());
     const [showDatePicker, setShowDatePicker] = useState(false);
     const [schedule, setSchedule] = useState<ScheduleItem[]>([]);
@@ -84,6 +87,16 @@ const ScheduleScreen: React.FC<ScheduleScreenProps> = ({ onRefreshPress, refresh
             loadLastVkUpdate();
         }
     }, [isFocused]);
+
+    // ДОБАВЛЕНО: Эффект для реакции на изменение триггера
+    useEffect(() => {
+        if (refreshTrigger > 0) {
+            console.log('🔄 Triggering schedule refresh from parent, trigger:', refreshTrigger);
+            loadScheduleFromDB();
+            loadUserGroup();
+            loadLastVkUpdate();
+        }
+    }, [refreshTrigger]);
 
     const initDatabase = () => {
         try {
@@ -140,7 +153,6 @@ const ScheduleScreen: React.FC<ScheduleScreenProps> = ({ onRefreshPress, refresh
         }
     };
 
-    // ИЗМЕНЕНО: Упрощенная функция обновления, если кнопка в App.tsx
     const handleRefresh = () => {
         if (onRefreshPress) {
             onRefreshPress(); // Используем callback из App.tsx
@@ -373,14 +385,6 @@ const ScheduleScreen: React.FC<ScheduleScreenProps> = ({ onRefreshPress, refresh
                     colors={['#6366F1', '#8B5CF6']}
                     style={styles.headerGradient}
                 >
-                    {/* УПРОЩЕННЫЙ header - убрана кнопка обновления */}
-                    <View style={styles.headerTopRow}>
-                        <View style={styles.groupContainer}>
-                            {userGroup && (
-                                <Text style={styles.groupText}>{userGroup}</Text>
-                            )}
-                        </View>
-                    </View>
 
                     {/* ИЗМЕНЕНО: Дата и информация об обновлении в одном блоке */}
                     <View style={styles.dateHeader}>
@@ -402,7 +406,7 @@ const ScheduleScreen: React.FC<ScheduleScreenProps> = ({ onRefreshPress, refresh
                                 {format(selectedDate, 'd MMMM yyyy', { locale: ru })}
                             </Text>
                             {/* ИЗМЕНЕНО: Дата обновления под основной датой */}
-                            {lastVkUpdate && (
+                            {lastVkUpdate && isValid(lastVkUpdate) && (
                                 <Text style={styles.lastUpdateText}>
                                     Обновлено: {format(lastVkUpdate, 'dd.MM.yyyy HH:mm', { locale: ru })}
                                 </Text>
@@ -701,15 +705,6 @@ const styles = StyleSheet.create({
         paddingTop: 2,
         paddingBottom: 2,
         position: 'relative',
-    },
-    groupContainer: {
-        alignItems: 'center',
-    },
-    groupText: {
-        color: '#FFFFFF',
-        fontSize: 18,
-        fontWeight: '700',
-        opacity: 0.95,
     },
     dateHeader: {
         flexDirection: 'row',
