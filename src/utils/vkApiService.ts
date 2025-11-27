@@ -66,6 +66,52 @@ class VKApiService {
         return VKApiService.ACCESS_TOKENS.web;
     }
 
+    private validateScheduleData(scheduleItems: ParsedScheduleItem[]): string[] {
+        const errors: string[] = [];
+
+        console.log(`Server-side validation of ${scheduleItems.length} schedule items`);
+
+        scheduleItems.forEach((item, index) => {
+            if (!item.subject || item.subject.trim().length === 0) {
+                errors.push(`Item ${index}: Subject name is required`);
+            } else if (item.subject.length < 2) {
+                errors.push(`Item ${index}: Subject name is too short`);
+            } else if (item.subject.length > 100) {
+                errors.push(`Item ${index}: Subject name is too long`);
+            }
+
+            if (!item.date || !(item.date instanceof Date) || isNaN(item.date.getTime())) {
+                errors.push(`Item ${index}: Invalid date`);
+            } else {
+                const today = new Date();
+                today.setHours(0, 0, 0, 0);
+                if (item.date < today) {
+                    errors.push(`Item ${index}: Date is in the past - ${item.date.toLocaleDateString()}`);
+                }
+            }
+
+            if (!item.time || !item.time.includes('-')) {
+                errors.push(`Item ${index}: Invalid time format - "${item.time}"`);
+            }
+
+            if (item.teacher && item.teacher.length > 50) {
+                errors.push(`Item ${index}: Teacher name is too long`);
+            }
+
+            if (item.classroom && item.classroom.length > 20) {
+                errors.push(`Item ${index}: Classroom number is too long`);
+            }
+        });
+
+        if (errors.length > 0) {
+            console.log('Server validation errors:', errors);
+        } else {
+            console.log('Server validation passed successfully');
+        }
+
+        return errors;
+    }
+
     public async getGroupPosts(count: number = 50): Promise<VKPost[]> {
         return this.getRealGroupPosts(count);
     }
@@ -390,11 +436,17 @@ class VKApiService {
         let importedCount = 0;
 
         try {
+            const validationErrors = this.validateScheduleData(scheduleItems);
+            if (validationErrors.length > 0) {
+                console.error('Data validation errors:', validationErrors);
+                throw new Error(`Data validation failed: ${validationErrors.slice(0, 3).join(', ')}${validationErrors.length > 3 ? '...' : ''}`);
+            }
+
             const datesToUpdate = [...new Set(scheduleItems.map(item =>
                 item.date.toISOString().split('T')[0]
             ))];
 
-            console.log(`Updating dates: ${datesToUpdate.join(', ')}`);
+            console.log(`🗑Updating dates: ${datesToUpdate.join(', ')}`);
 
             datesToUpdate.forEach(date => {
                 try {
@@ -402,9 +454,9 @@ class VKApiService {
                         'DELETE FROM schedule WHERE date LIKE ? AND student_group = ?',
                         [`${date}%`, userGroup]
                     );
-                    console.log(`Deleted old schedule for ${date}, group: ${userGroup}`);
+                    console.log(`Removed old schedule for ${date}, group: ${userGroup}`);
                 } catch (error) {
-                    console.log('Error deleting old schedule:', error);
+                    console.log('Error removing old schedule:', error);
                 }
             });
 
@@ -426,7 +478,7 @@ class VKApiService {
                     importedCount++;
                     console.log(`Saved class: ${item.subject} ${item.date.toISOString()}`);
                 } catch (error) {
-                    console.log('Error saving class:', error, {
+                    console.log('Error saving schedule item:', error, {
                         subject: item.subject,
                         time: item.time,
                         teacher: item.teacher,
@@ -442,7 +494,7 @@ class VKApiService {
             console.log(`Imported ${importedCount} classes for group ${userGroup}`);
             return importedCount;
         } catch (error) {
-            console.log('Error saving to DB:', error);
+            console.log('Database operation error:', error);
             throw error;
         }
     }
