@@ -33,6 +33,28 @@ import { db } from '../utils/databaseService';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+const validateNote = (note: { content: string; subject: string }): string[] => {
+    const errors: string[] = [];
+
+    if (!note.content.trim()) {
+        errors.push('Описание обязательно для заполнения');
+    }
+
+    if (note.content.trim().length < 5) {
+        errors.push('Описание должно содержать минимум 5 символов');
+    }
+
+    if (note.content.trim().length > 500) {
+        errors.push('Описание не должно превышать 500 символов');
+    }
+
+    if (!note.subject.trim()) {
+        errors.push('Предмет обязателен для выбора');
+    }
+
+    return errors;
+};
+
 interface Note {
     id: string;
     title: string;
@@ -163,12 +185,9 @@ const NotesScreen = () => {
         console.log('Add note clicked');
         console.log('Current note data:', newNote);
 
-        if (!newNote.content.trim()) {
-            Alert.alert('Ошибка', 'Введите описание заметки');
-            return;
-        }
-        if (!newNote.subject.trim()) {
-            Alert.alert('Ошибка', 'Выберите предмет');
+        const validationErrors = validateNote(newNote);
+        if (validationErrors.length > 0) {
+            Alert.alert('Ошибка валидации', validationErrors.join('\n• '));
             return;
         }
 

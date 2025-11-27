@@ -14,6 +14,11 @@ import { db } from '../utils/databaseService';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 
+const validateGroupFormat = (group: string): boolean => {
+    const groupRegex = /^[А-Я]{2,}к?-\d{3}-\d{2}-\d{2}$/;
+    return groupRegex.test(group);
+};
+
 const SettingsScreen = () => {
     const [userGroup, setUserGroup] = useState('');
     const [groupModalVisible, setGroupModalVisible] = useState(false);
@@ -52,6 +57,18 @@ const SettingsScreen = () => {
     const saveGroup = () => {
         if (!newGroup.trim()) {
             Alert.alert('Ошибка', 'Введите номер группы');
+            return;
+        }
+
+        if (!validateGroupFormat(newGroup.trim())) {
+            Alert.alert(
+                'Ошибка',
+                'Неверный формат группы.\nПример правильного формата: ИСПк-104-52-00\n\n' +
+                'Формат: БУКВЫ-ЦИФРЫ-ЦИФРЫ-ЦИФРЫ\n' +
+                '- Буквы: заглавные русские (2-4 символа)\n' +
+                '- "к" после букв для колледжа (опционально)\n' +
+                '- Примеры: ИСП-104-52-00, ДО-101-51-00, ИСПк-104-52-00'
+            );
             return;
         }
 
