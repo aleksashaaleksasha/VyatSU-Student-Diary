@@ -75,11 +75,11 @@ export class ExcelScheduleParser {
                 const cellValue = rowData[col]?.toString().trim();
                 if (!cellValue) continue;
 
-                console.log(`🔍 Checking cell [${row},${col}]: "${cellValue}"`);
+                console.log(`Checking cell [${row},${col}]: "${cellValue}"`);
 
                 const yearMatch = cellValue.match(/На\s+(\d+)\s+(?:полугодие|семестр)\s+(\d{4})\s*-\s*(\d{4})\s+учебного года/i);
                 if (yearMatch) {
-                    console.log(`✅ FOUND ACADEMIC INFO: ${yearMatch[0]}`);
+                    console.log(`FOUND ACADEMIC INFO: ${yearMatch[0]}`);
 
                     result.semester = yearMatch[1].includes('1') ? '1 полугодие' : '2 полугодие';
                     result.academicYear = `${yearMatch[2]}-${yearMatch[3]}`;
@@ -102,7 +102,7 @@ export class ExcelScheduleParser {
         result.academicYear = `${currentYear}-${currentYear + 1}`;
         result.semester = currentMonth >= 9 ? '1 полугодие' : '2 полугодие';
 
-        console.log(`⚠️ Using default academic year: ${result.academicYear}, ${result.semester}`);
+        console.log(`Using default academic year: ${result.academicYear}, ${result.semester}`);
 
         return result;
     }
@@ -200,16 +200,16 @@ export class ExcelScheduleParser {
         }
 
         if (dayInfo.dayNumber < 1 || dayInfo.dayNumber > 31) {
-            console.error(`❌ Некорректный день: ${dayInfo.dayNumber}`);
+            console.error(`Incorrect day: ${dayInfo.dayNumber}`);
             return new Date();
         }
 
         if (dayInfo.month < 1 || dayInfo.month > 12) {
-            console.error(`❌ Некорректный месяц: ${dayInfo.month}`);
+            console.error(`Incorrect month: ${dayInfo.month}`);
             return new Date();
         }
 
-        console.log(`🗓️ DATE PARSED: ${dayInfo.dayNumber}.${dayInfo.month}.${year} (${dayInfo.day}, ${semester})`);
+        console.log(`DATE PARSED: ${dayInfo.dayNumber}.${dayInfo.month}.${year} (${dayInfo.day}, ${semester})`);
 
         return new Date(year, dayInfo.month - 1, dayInfo.dayNumber);
     }
@@ -234,7 +234,7 @@ export class ExcelScheduleParser {
             return [];
         }
 
-        console.log('=== ANALYZING EXCEL STRUCTURE ===');
+        console.log('    ANALYZING EXCEL STRUCTURE    ');
         console.log(`Schedule starts from column: ${this.SCHEDULE_START_COLUMN} (column G)`);
 
         const academicInfo = this.extractAcademicInfo(data);
@@ -276,7 +276,7 @@ export class ExcelScheduleParser {
                             semester: academicInfo.semester || '1 полугодие'
                         });
 
-                        console.log(`✅ GROUP: ${groupName} -> columns ${groupStartColumn}-${groupStartColumn + 3}`);
+                        console.log(`GROUP: ${groupName} -> columns ${groupStartColumn}-${groupStartColumn + 3}`);
                     });
 
                     col += 3;
@@ -284,7 +284,7 @@ export class ExcelScheduleParser {
             }
         }
 
-        console.log('\n=== FINAL GROUP STRUCTURE ===');
+        console.log('\n    FINAL GROUP STRUCTURE    ');
         groups.forEach(g => {
             console.log(`${g.group}: columns ${g.startColumn}-${g.startColumn + 3}, ${g.speciality}`);
         });
@@ -296,7 +296,7 @@ export class ExcelScheduleParser {
         const firstCell = row[this.SCHEDULE_START_COLUMN]?.toString().trim();
         if (!firstCell) return null;
 
-        console.log(`🔍 RAW DAY ROW: "${firstCell}"`);
+        console.log(`RAW DAY ROW: "${firstCell}"`);
 
         const match = firstCell.match(/(ПОНЕДЕЛЬНИК|ВТОРНИК|СРЕДА|ЧЕТВЕРГ|ПЯТНИЦА|СУББОТА)\s+(\d{1,2})\.(\d{1,2})/i);
 
@@ -304,7 +304,7 @@ export class ExcelScheduleParser {
             const dayNumber = parseInt(match[2]);
             const month = parseInt(match[3]);
 
-            console.log(`📅 PARSED DATE: ${match[1]} - ${dayNumber}.${month} from "${firstCell}"`);
+            console.log(`PARSED DATE: ${match[1]} - ${dayNumber}.${month} from "${firstCell}"`);
 
             return {
                 day: match[1].toUpperCase(),
@@ -313,7 +313,7 @@ export class ExcelScheduleParser {
             };
         }
 
-        console.log(`❌ FAILED TO PARSE DATE: "${firstCell}"`);
+        console.log(`FAILED TO PARSE DATE: "${firstCell}"`);
         return null;
     }
 
@@ -367,7 +367,7 @@ export class ExcelScheduleParser {
         if (mergedCellsMap.has(key)) {
             const mergeInfo = mergedCellsMap.get(key)!;
             const mainValue = this.getCellValue(data, mergeInfo.startRow, mergeInfo.startCol);
-            console.log(`🔗 Merged cell [${row},${col}] -> [${mergeInfo.startRow},${mergeInfo.startCol}]: "${mainValue}"`);
+            console.log(`Merged cell [${row},${col}] -> [${mergeInfo.startRow},${mergeInfo.startCol}]: "${mainValue}"`);
             return mainValue;
         }
 
@@ -386,11 +386,11 @@ export class ExcelScheduleParser {
         const targetGroup = allGroups.find(g => g.group === userGroup);
 
         if (!targetGroup) {
-            console.log(`❌ Group ${userGroup} not found in groups list`);
+            console.log(`Group ${userGroup} not found in groups list`);
             return [];
         }
 
-        console.log(`\n=== PARSING SCHEDULE FOR ${userGroup} WITH MERGED CELLS SUPPORT ===`);
+        console.log(`\n    PARSING SCHEDULE FOR ${userGroup} WITH MERGED CELLS SUPPORT    `);
         console.log(`Target group:`, targetGroup);
 
         const mergedCellsMap = this.createMergedCellsMap(mergedCells);
@@ -406,7 +406,7 @@ export class ExcelScheduleParser {
             if (dayInfo) {
                 currentDayInfo = dayInfo;
                 currentPairNumber = 0;
-                console.log(`\n🎯 NEW DAY: ${dayInfo.day} ${dayInfo.dayNumber}.${dayInfo.month} at row ${rowIndex}`);
+                console.log(`\nNEW DAY: ${dayInfo.day} ${dayInfo.dayNumber}.${dayInfo.month} at row ${rowIndex}`);
                 continue;
             }
 
@@ -459,22 +459,22 @@ export class ExcelScheduleParser {
                     semester: targetGroup.semester
                 };
 
-                console.log(`✅ PARSED [${currentPairNumber}]: ${scheduleItem.time} - ${scheduleItem.subject}`);
+                console.log(`   PARSED [${currentPairNumber}]: ${scheduleItem.time} - ${scheduleItem.subject}`);
                 console.log(`   Teacher: ${scheduleItem.teacher}, Classroom: ${scheduleItem.classroom}, Type: ${scheduleItem.type}`);
 
                 scheduleItems.push(scheduleItem);
                 currentPairNumber++;
             } else if (isSpecialDay) {
-                console.log(`⏭️ SKIPPED SPECIAL: ${subject}`);
+                console.log(`   SKIPPED SPECIAL: ${subject}`);
             } else if (isEmptySubject) {
-                console.log(`➖ EMPTY SLOT: ${timeCell}`);
+                console.log(`   EMPTY SLOT: ${timeCell}`);
             }
         }
 
-        console.log(`\n=== TOTAL PARSED ITEMS: ${scheduleItems.length} ===`);
+        console.log(`\n    TOTAL PARSED ITEMS: ${scheduleItems.length}    `);
         scheduleItems.forEach(item => {
             const dateStr = item.date.toLocaleDateString('ru-RU');
-            console.log(`📌 ${item.dayOfWeek} ${dateStr}: ${item.time} - ${item.subject}`);
+            console.log(`   ${item.dayOfWeek} ${dateStr}: ${item.time} - ${item.subject}`);
         });
 
         return scheduleItems;
@@ -483,7 +483,7 @@ export class ExcelScheduleParser {
     private static restoreMergedCellsData(data: any[][]): any[][] {
         const restoredData = JSON.parse(JSON.stringify(data));
 
-        console.log('🔄 Restoring merged cells data...');
+        console.log('   Restoring merged cells data...');
 
         for (let row = 25; row < restoredData.length; row++) {
             if (!restoredData[row]) continue;
@@ -499,7 +499,7 @@ export class ExcelScheduleParser {
                     if (valueAbove && timeCurrent && timeAbove &&
                         timeCurrent.toString().includes('-') && timeAbove.toString().includes('-')) {
                         restoredData[row][col] = valueAbove;
-                        console.log(`🔁 Restored [${row},${col}] from [${row-1},${col}]: "${valueAbove}"`);
+                        console.log(`   Restored [${row},${col}] from [${row-1},${col}]: "${valueAbove}"`);
                     }
                 }
             }
@@ -531,7 +531,7 @@ export class ExcelScheduleParser {
 
             const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[][];
 
-            console.log('=== EXCEL FILE FROM ARRAYBUFFER LOADED ===');
+            console.log('    EXCEL FILE FROM ARRAYBUFFER LOADED    ');
             console.log('Total rows:', jsonData.length);
             console.log(`Schedule starts from column: ${this.SCHEDULE_START_COLUMN} (column G)`);
             console.log(`Merged cells: ${mergedCells.length}`);
@@ -562,15 +562,15 @@ export class ExcelScheduleParser {
                 };
             }
 
-            console.log(`\n=== STARTING IMPORT FOR GROUP: ${userGroup} ===`);
+            console.log(`\n    STARTING IMPORT FOR GROUP: ${userGroup}    `);
 
             let parsedData: ParsedScheduleItem[];
 
             if (mergedCells.length > 0) {
-                console.log('🔧 Using merged cells information for parsing');
+                console.log('   Using merged cells information for parsing');
                 parsedData = this.parseSubjectDataWithMergedCells(jsonData, userGroup, mergedCells);
             } else {
-                console.log('🔧 Using heuristic method for merged cells');
+                console.log('   Using heuristic method for merged cells');
                 parsedData = this.parseSubjectData(jsonData, userGroup);
             }
 

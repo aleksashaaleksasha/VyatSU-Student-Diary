@@ -71,7 +71,7 @@ class VKApiService {
     }
 
     public async downloadScheduleFile(doc: VKDoc): Promise<ArrayBuffer> {
-        console.log(`📥 Загрузка файла: ${doc.title}`);
+        console.log(`Downloading file: ${doc.title}`);
 
         if (Platform.OS === 'web') {
             return await this.downloadScheduleFileWithProxy(doc);
@@ -84,41 +84,41 @@ class VKApiService {
         try {
             const proxyUrl = `${VKApiService.PROXY_SERVER}/api/simple-file-proxy?url=${encodeURIComponent(doc.url)}`;
 
-            console.log(`🌐 Загрузка через улучшенный прокси`);
-            console.log(`📡 URL: ${proxyUrl.substring(0, 100)}...`);
+            console.log(`Downloading with proxy`);
+            console.log(`URL: ${proxyUrl.substring(0, 100)}...`);
 
             const response = await this.fetchWithTimeout(proxyUrl, {}, 30000);
 
             if (!response.ok) {
-                throw new Error(`Ошибка загрузки файла: ${response.status}`);
+                throw new Error(`Error: ${response.status}`);
             }
 
             const arrayBuffer = await response.arrayBuffer();
-            console.log(`✅ Загружено ${arrayBuffer.byteLength} байт`);
+            console.log(`Loaded ${arrayBuffer.byteLength} bytes`);
             return arrayBuffer;
 
         } catch (error) {
-            console.error('❌ Ошибка загрузки через прокси:', error);
-            throw new Error(`Не удалось загрузить файл: ${error instanceof Error ? error.message : 'Unknown error'}`);
+            console.error('Error downloading with proxy:', error);
+            throw new Error(`Error downloading file: ${error instanceof Error ? error.message : 'Unknown error'}`);
         }
     }
 
     private async downloadScheduleFileDirect(doc: VKDoc): Promise<ArrayBuffer> {
         try {
-            console.log(`📥 Прямая загрузка файла`);
+            console.log(`Downloading file`);
             const response = await this.fetchWithTimeout(doc.url, {}, 15000);
 
             if (!response.ok) {
-                throw new Error(`Ошибка загрузки файла: ${response.status}`);
+                throw new Error(`Error downloading file: ${response.status}`);
             }
 
             const arrayBuffer = await response.arrayBuffer();
-            console.log(`✅ Загружено ${arrayBuffer.byteLength} байт`);
+            console.log(`Loaded ${arrayBuffer.byteLength} bytes`);
             return arrayBuffer;
 
         } catch (error) {
-            console.error('❌ Ошибка прямой загрузки:', error);
-            throw new Error(`Не удалось загрузить файл: ${error instanceof Error ? error.message : 'Unknown error'}`);
+            console.error('Error downloading file:', error);
+            throw new Error(`Error downloading file: ${error instanceof Error ? error.message : 'Unknown error'}`);
         }
     }
 
@@ -141,7 +141,7 @@ class VKApiService {
 
     public async getRealGroupPosts(count: number = 50): Promise<VKPost[]> {
         try {
-            console.log('🔄 Получение постов из VK...');
+            console.log('Getting posts from VK...');
 
             if (Platform.OS === 'web') {
                 return await this.getRealPostsWithProxy(count);
@@ -149,8 +149,8 @@ class VKApiService {
                 return await this.getRealPostsDirect(count);
             }
         } catch (error) {
-            console.error('Ошибка получения постов:', error);
-            throw new Error('Не удалось получить постов из VK');
+            console.error('Error loading posts:', error);
+            throw new Error('Error loading posts');
         }
     }
 
@@ -161,30 +161,30 @@ class VKApiService {
 
             const proxyUrl = `${VKApiService.PROXY_SERVER}/api/vk-proxy?method=wall.get&params=${encodeURIComponent(params)}`;
 
-            console.log(`🌐 Запрос через собственный прокси`);
-            console.log(`🔑 Используется ${Platform.OS.toUpperCase()} ключ`);
+            console.log(`Request via own proxy`);
+            console.log(`Using ${Platform.OS.toUpperCase()} key`);
 
             const response = await this.fetchWithTimeout(proxyUrl, {}, 15000);
 
             if (!response.ok) {
-                throw new Error(`HTTP ошибка: ${response.status}`);
+                throw new Error(`HTTP error: ${response.status}`);
             }
 
             const data = await response.json();
 
             if (data.error) {
-                console.error('Ошибка VK API:', data.error);
+                console.error('VK API error:', data.error);
                 throw new Error(`VK API: ${data.error.error_msg}`);
             }
 
             const posts = data.response?.items || [];
-            console.log(`📝 Получено ${posts.length} постов`);
+            console.log(`Received ${posts.length} posts`);
 
             return posts;
 
         } catch (error) {
-            console.error('❌ Ошибка запроса через собственный прокси:', error);
-            throw new Error(`Прокси сервер не доступен. Убедитесь, что он запущен на порту 3001. ${error instanceof Error ? error.message : ''}`);
+            console.error('Error requesting via own proxy:', error);
+            throw new Error(`Proxy server not available. Make sure it is running on port 3001. ${error instanceof Error ? error.message : ''}`);
         }
     }
 
@@ -198,8 +198,8 @@ class VKApiService {
                 `access_token=${accessToken}&` +
                 `v=${VKApiService.API_VERSION}`;
 
-            console.log(`🌐 Прямой запрос к VK API`);
-            console.log(`🔑 Используется ${Platform.OS.toUpperCase()} ключ`);
+            console.log(`Direct request to VK API`);
+            console.log(`Using ${Platform.OS.toUpperCase()} key`);
 
             const response = await this.fetchWithTimeout(vkUrl, {
                 headers: {
@@ -209,37 +209,37 @@ class VKApiService {
             }, 15000);
 
             if (!response.ok) {
-                throw new Error(`HTTP ошибка: ${response.status}`);
+                throw new Error(`HTTP error: ${response.status}`);
             }
 
             const data = await response.json();
-            console.log('✅ Ответ от VK API получен');
+            console.log('Response from VK API received');
 
             if (data.error) {
-                console.error('Ошибка VK API:', data.error);
+                console.error('VK API error:', data.error);
                 throw new Error(`VK API: ${data.error.error_msg}`);
             }
 
             const posts = data.response?.items || [];
-            console.log(`📝 Получено ${posts.length} постов`);
+            console.log(`Received ${posts.length} posts`);
 
             return posts;
 
         } catch (error) {
-            console.error('❌ Ошибка прямого запроса:', error);
-            throw new Error(`Не удалось получить посты: ${error instanceof Error ? error.message : 'Unknown error'}`);
+            console.error('Error in direct request:', error);
+            throw new Error(`Failed to get posts: ${error instanceof Error ? error.message : 'Unknown error'}`);
         }
     }
 
     public isSchedulePost(post: VKPost): boolean {
         const text = post.text.toLowerCase();
 
-        console.log(`🔍 Проверка поста ${post.id}: "${text.substring(0, 100)}..."`);
+        console.log(`Checking post ${post.id}: "${text.substring(0, 100)}..."`);
 
         const hasKeywords = VKApiService.SCHEDULE_KEYWORDS.some(keyword => {
             const found = text.includes(keyword.toLowerCase());
             if (found) {
-                console.log(`✅ Найден ключ: "${keyword}"`);
+                console.log(`Found keyword: "${keyword}"`);
             }
             return found;
         });
@@ -249,11 +249,11 @@ class VKApiService {
             post.attachments.forEach((attachment: VKAttachment, index: number) => {
                 if (attachment.type === 'doc' && attachment.doc) {
                     const doc = attachment.doc;
-                    console.log(`📎 Вложение ${index}: "${doc.title}" (${doc.ext})`);
+                    console.log(`Attachment ${index}: "${doc.title}" (${doc.ext})`);
 
                     if (doc.ext === 'xlsx' || doc.ext === 'xls') {
                         const isScheduleFile = this.isScheduleFileName(doc.title);
-                        console.log(`📊 Excel файл "${doc.title}" - расписание: ${isScheduleFile}`);
+                        console.log(`Excel file "${doc.title}" - schedule: ${isScheduleFile}`);
                         if (isScheduleFile) {
                             hasExcelFile = true;
                         }
@@ -263,7 +263,7 @@ class VKApiService {
         }
 
         const isSchedule = hasKeywords || hasExcelFile;
-        console.log(`📋 Пост ${post.id} - расписание: ${isSchedule} (ключи: ${hasKeywords}, Excel: ${hasExcelFile})`);
+        console.log(`Post ${post.id} - schedule: ${isSchedule} (keywords: ${hasKeywords}, Excel: ${hasExcelFile})`);
 
         return isSchedule;
     }
@@ -290,32 +290,32 @@ class VKApiService {
 
         const isSchedule = (hasScheduleWord || hasDate) && hasExcelExtension;
 
-        console.log(`📁 Файл "${fileName}" - расписание: ${isSchedule} (расписание: ${hasScheduleWord}, дата: ${hasDate}, excel: ${hasExcelExtension})`);
+        console.log(`File "${fileName}" - schedule: ${isSchedule} (schedule: ${hasScheduleWord}, date: ${hasDate}, excel: ${hasExcelExtension})`);
 
         return isSchedule;
     }
 
     async checkForScheduleUpdates(userGroup: string): Promise<ScheduleUpdateResult> {
         try {
-            console.log('🔍 Проверка обновлений расписания...');
-            console.log(`👥 Группа: ${userGroup}`);
+            console.log('Checking for schedule updates...');
+            console.log(`Group: ${userGroup}`);
 
             if (!userGroup) {
-                throw new Error('Группа не выбрана');
+                throw new Error('Group not selected');
             }
 
             const posts = await this.getRealGroupPosts(30);
             let newScheduleCount = 0;
 
-            console.log(`📝 Анализируем ${posts.length} постов...`);
+            console.log(`Analyzing ${posts.length} posts...`);
 
             const sortedPosts = posts.sort((a: VKPost, b: VKPost) => b.date - a.date);
             const schedulePosts = sortedPosts.filter(post => this.isSchedulePost(post));
 
-            console.log(`🎯 Найдено ${schedulePosts.length} постов с расписанием`);
+            console.log(`Found ${schedulePosts.length} posts with schedule`);
 
             for (const post of schedulePosts) {
-                console.log(`📋 Обработка поста ${post.id}...`);
+                console.log(`Processing post ${post.id}...`);
 
                 const excelAttachments = post.attachments?.filter((att: VKAttachment) =>
                     att.type === 'doc' &&
@@ -324,27 +324,27 @@ class VKApiService {
                     this.isScheduleFileName(att.doc.title)
                 ) || [];
 
-                console.log(`📎 Найдено ${excelAttachments.length} Excel файлов в посте ${post.id}`);
+                console.log(`Found ${excelAttachments.length} Excel files in post ${post.id}`);
 
                 for (const attachment of excelAttachments) {
                     if (attachment.doc) {
                         try {
-                            console.log(`📥 Загрузка файла: ${attachment.doc.title}`);
+                            console.log(`Downloading file: ${attachment.doc.title}`);
 
                             const arrayBuffer = await this.downloadScheduleFile(attachment.doc);
                             const count = await this.processScheduleFile(arrayBuffer, userGroup);
 
                             newScheduleCount += count;
-                            console.log(`✅ Файл обработан: ${attachment.doc.title}, добавлено ${count} занятий`);
+                            console.log(`File processed: ${attachment.doc.title}, added ${count} classes`);
 
                         } catch (error) {
-                            console.error(`❌ Ошибка обработки файла ${attachment.doc.title}:`, error);
+                            console.error(`Error processing file ${attachment.doc.title}:`, error);
                         }
                     }
                 }
             }
 
-            console.log(`✅ Проверка завершена. Новых занятий: ${newScheduleCount}`);
+            console.log(`Check completed. New classes: ${newScheduleCount}`);
 
             return {
                 success: true,
@@ -353,35 +353,35 @@ class VKApiService {
             };
 
         } catch (error) {
-            console.error('❌ Ошибка проверки обновлений:', error);
+            console.error('Error checking for updates:', error);
             return {
                 success: false,
                 newScheduleCount: 0,
                 lastUpdate: new Date(),
-                error: error instanceof Error ? error.message : 'Неизвестная ошибка'
+                error: error instanceof Error ? error.message : 'Unknown error'
             };
         }
     }
 
     async forceCheckUpdates(userGroup: string): Promise<ScheduleUpdateResult> {
-        console.log('🔄 Принудительная проверка обновлений...');
+        console.log('Forced update check...');
         return await this.checkForScheduleUpdates(userGroup);
     }
 
     public async processScheduleFile(arrayBuffer: ArrayBuffer, userGroup: string): Promise<number> {
         try {
-            console.log(`🔧 Обработка Excel файла для группы: ${userGroup}`);
+            console.log(`Processing Excel file for group: ${userGroup}`);
 
             const result = await ExcelScheduleParser.importFromArrayBuffer(arrayBuffer, userGroup);
 
             if (result.success && result.data.length > 0) {
                 return this.saveScheduleToDB(result.data, userGroup);
             } else {
-                throw new Error(result.error || 'Не удалось распарсить файл');
+                throw new Error(result.error || 'Failed to parse file');
             }
 
         } catch (error) {
-            console.error('Ошибка обработки файла:', error);
+            console.error('Error processing file:', error);
             throw error;
         }
     }
@@ -394,7 +394,7 @@ class VKApiService {
                 item.date.toISOString().split('T')[0]
             ))];
 
-            console.log(`🗑️ Обновление дат: ${datesToUpdate.join(', ')}`);
+            console.log(`Updating dates: ${datesToUpdate.join(', ')}`);
 
             datesToUpdate.forEach(date => {
                 try {
@@ -402,9 +402,9 @@ class VKApiService {
                         'DELETE FROM schedule WHERE date LIKE ? AND student_group = ?',
                         [`${date}%`, userGroup]
                     );
-                    console.log(`✅ Удалено старое расписание для ${date}, группа: ${userGroup}`);
+                    console.log(`Deleted old schedule for ${date}, group: ${userGroup}`);
                 } catch (error) {
-                    console.log('Ошибка удаления старого расписания:', error);
+                    console.log('Error deleting old schedule:', error);
                 }
             });
 
@@ -424,9 +424,9 @@ class VKApiService {
                         ]
                     );
                     importedCount++;
-                    console.log(`✅ Сохранено занятие: ${item.subject} ${item.date.toISOString()}`);
+                    console.log(`Saved class: ${item.subject} ${item.date.toISOString()}`);
                 } catch (error) {
-                    console.log('Ошибка сохранения занятия:', error, {
+                    console.log('Error saving class:', error, {
                         subject: item.subject,
                         time: item.time,
                         teacher: item.teacher,
@@ -439,10 +439,10 @@ class VKApiService {
                 }
             });
 
-            console.log(`✅ Импортировано ${importedCount} занятий для группы ${userGroup}`);
+            console.log(`Imported ${importedCount} classes for group ${userGroup}`);
             return importedCount;
         } catch (error) {
-            console.log('Ошибка сохранения в БД:', error);
+            console.log('Error saving to DB:', error);
             throw error;
         }
     }
