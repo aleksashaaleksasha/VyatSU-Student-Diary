@@ -1,7 +1,6 @@
 import * as SQLite from 'expo-sqlite';
 import { Platform } from 'react-native';
 
-// Интерфейс для универсальной работы с БД
 interface DatabaseResult {
     rows: any[];
     insertId?: number;
@@ -22,9 +21,7 @@ class DatabaseService {
         }
     }
 
-    // Инициализация Web Storage
     private initWebStorage() {
-        // Проверяем, есть ли необходимые ключи в localStorage
         const requiredKeys = ['settings', 'schedule', 'notes', 'update_history'];
 
         requiredKeys.forEach(key => {
@@ -34,7 +31,6 @@ class DatabaseService {
         });
     }
 
-    // Универсальный метод выполнения SQL
     execSync(sql: string, params: any[] = []): void {
         if (this.isWeb) {
             this.execWeb(sql, params);
@@ -43,7 +39,6 @@ class DatabaseService {
         }
     }
 
-    // Универсальный метод получения первой записи
     getFirstSync(sql: string, params: any[] = []): any {
         if (this.isWeb) {
             return this.getFirstWeb(sql, params);
@@ -52,7 +47,6 @@ class DatabaseService {
         }
     }
 
-    // Универсальный метод получения всех записей
     getAllSync(sql: string, params: any[] = []): any[] {
         if (this.isWeb) {
             return this.getAllWeb(sql, params);
@@ -61,7 +55,6 @@ class DatabaseService {
         }
     }
 
-    // Универсальный метод выполнения запросов с возвратом результата
     runSync(sql: string, params: any[] = []): DatabaseResult {
         if (this.isWeb) {
             return this.runWeb(sql, params);
@@ -70,9 +63,7 @@ class DatabaseService {
         }
     }
 
-    // Web-реализация методов
     private execWeb(sql: string, params: any[] = []): void {
-        // Для простых CREATE TABLE
         console.log('Web EXEC:', sql);
     }
 
@@ -119,7 +110,6 @@ class DatabaseService {
         }
     }
 
-    // Парсинг SQL запросов
     private parseSQL(sql: string): { table: string; action: string } {
         const trimmed = sql.trim().toUpperCase();
         const words = trimmed.split(/\s+/);
@@ -128,9 +118,8 @@ class DatabaseService {
         let table = '';
 
         if (action === 'CREATE' && words[1] === 'TABLE') {
-            table = words[3] || ''; // CREATE TABLE IF NOT EXISTS table_name
+            table = words[3] || '';
         } else if (action === 'INSERT' || action === 'UPDATE' || action === 'DELETE') {
-            // Находим таблицу после INTO, UPDATE, или FROM
             const tableIndex = words.findIndex(word =>
                 word === 'INTO' || word === 'UPDATE' || word === 'FROM'
             );
@@ -138,7 +127,6 @@ class DatabaseService {
                 table = words[tableIndex + 1];
             }
         } else if (action === 'SELECT') {
-            // Для SELECT находим таблицу после FROM
             const fromIndex = words.findIndex(word => word === 'FROM');
             if (fromIndex !== -1 && words[fromIndex + 1]) {
                 table = words[fromIndex + 1];
@@ -148,14 +136,11 @@ class DatabaseService {
         return { table, action };
     }
 
-    // Обработка SELECT для Web
     private handleSelectWeb(table: string, sql: string, params: any[]): any[] {
         const data = this.getWebStorage(table);
 
-        // Простая фильтрация по условиям WHERE
         let filteredData = [...data];
 
-        // Базовая фильтрация по параметрам
         if (params.length > 0) {
             filteredData = filteredData.filter(item => {
                 return params.every((param, index) => {
@@ -168,7 +153,6 @@ class DatabaseService {
             });
         }
 
-        // Сортировка по ORDER BY
         if (sql.includes('ORDER BY')) {
             const orderMatch = sql.match(/ORDER BY\s+([^\s,]+)\s+(ASC|DESC)?/i);
             if (orderMatch) {
@@ -183,7 +167,6 @@ class DatabaseService {
             }
         }
 
-        // LIMIT
         if (sql.includes('LIMIT')) {
             const limitMatch = sql.match(/LIMIT\s+(\d+)/i);
             if (limitMatch) {
@@ -195,12 +178,10 @@ class DatabaseService {
         return filteredData;
     }
 
-    // Обработка INSERT для Web
     private handleInsertWeb(table: string, sql: string, params: any[]): DatabaseResult {
         const data = this.getWebStorage(table);
         const newItem: any = {};
 
-        // Заполняем данные из SQL запроса
         const keyMatch = sql.match(/\(([^)]+)\)/);
         if (keyMatch) {
             const keys = keyMatch[1].split(',').map(k => k.trim());
@@ -209,7 +190,6 @@ class DatabaseService {
                 newItem[key] = params[index];
             });
 
-            // ГАРАНТИРОВАННО создаем ID для веб-версии
             if (!newItem.id) {
                 newItem.id = this.generateWebId(table, newItem);
             }
@@ -227,20 +207,16 @@ class DatabaseService {
         return { rows: [], rowsAffected: 0 };
     }
 
-    // Обработка UPDATE для Web
     private handleUpdateWeb(table: string, sql: string, params: any[]): DatabaseResult {
         const data = this.getWebStorage(table);
         let rowsAffected = 0;
 
-        // Простой UPDATE с WHERE
         if (sql.includes('WHERE')) {
             const whereIndex = sql.indexOf('WHERE');
             const whereClause = sql.substring(whereIndex + 5).trim();
 
             data.forEach(item => {
-                // Простая проверка условия WHERE
                 if (this.matchesWhereCondition(item, whereClause, params)) {
-                    // Обновляем поля
                     const setIndex = sql.indexOf('SET');
                     const setClause = sql.substring(setIndex + 3, whereIndex).trim();
                     const setParts = setClause.split(',').map(part => part.trim());
@@ -263,7 +239,6 @@ class DatabaseService {
         return { rows: [], rowsAffected };
     }
 
-    // Обработка DELETE для Web
     private handleDeleteWeb(table: string, sql: string, params: any[]): DatabaseResult {
         const data = this.getWebStorage(table);
         let rowsAffected = 0;
@@ -280,7 +255,6 @@ class DatabaseService {
 
             this.setWebStorage(table, newData);
         } else {
-            // DELETE без WHERE - очищаем таблицу
             rowsAffected = data.length;
             this.setWebStorage(table, []);
         }
@@ -288,9 +262,7 @@ class DatabaseService {
         return { rows: [], rowsAffected };
     }
 
-    // Проверка условий WHERE
     private matchesWhereCondition(item: any, whereClause: string, params: any[]): boolean {
-        // Простая реализация для основных случаев
         if (whereClause.includes('LIKE')) {
             const [key, value] = whereClause.split('LIKE').map(part => part.trim());
             const cleanKey = key.replace(/'/g, '').replace(/"/g, '');
@@ -308,7 +280,6 @@ class DatabaseService {
         return false;
     }
 
-    // Работа с Web Storage
     private getWebStorage(table: string): any[] {
         try {
             const data = localStorage.getItem(table);
@@ -329,16 +300,13 @@ class DatabaseService {
 
     private generateWebId(table: string, data: any): string | number {
         if (table === 'schedule') {
-            // Для расписания создаем уникальный ID на основе данных
             const { subject, time, date, student_group } = data;
             const dateStr = date instanceof Date ? date.toISOString() : date;
 
-            // Создаем хэш из данных предмета
             const keyString = `${subject}-${time}-${dateStr}-${student_group}`;
             return this.stringToHash(keyString);
         }
 
-        // Для других таблиц используем timestamp
         return Date.now();
     }
 
@@ -347,17 +315,15 @@ class DatabaseService {
         for (let i = 0; i < str.length; i++) {
             const char = str.charCodeAt(i);
             hash = ((hash << 5) - hash) + char;
-            hash = hash & hash; // Convert to 32bit integer
+            hash = hash & hash;
         }
         return Math.abs(hash);
     }
 
-    // Транзакции (упрощенная версия для Web)
     withTransactionSync(callback: () => void): void {
         if (this.isWeb) {
-            callback(); // В Web просто выполняем callback
+            callback();
         } else {
-            // В Native используем транзакции SQLite
             try {
                 this.db.execSync('BEGIN TRANSACTION;');
                 callback();
@@ -370,6 +336,5 @@ class DatabaseService {
     }
 }
 
-// Экспортируем синглтон
 export const databaseService = new DatabaseService();
 export const db = databaseService;

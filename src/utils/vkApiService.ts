@@ -1,5 +1,3 @@
-// vkApiService.ts - УБРАНЫ ВСЕ ПСЕВДОДАННЫЕ
-
 import { Platform } from 'react-native';
 import { db } from './databaseService';
 import { ExcelScheduleParser, ParsedScheduleItem } from './excelParser';
@@ -35,9 +33,16 @@ export interface ScheduleUpdateResult {
 }
 
 class VKApiService {
-    private static readonly ACCESS_TOKEN = '0703d2530703d2530703d25392043faa99007030703d2536e123af6c8dc115819766127';
+    private static readonly ACCESS_TOKENS = {
+        web: '9d4ded009d4ded009d4ded001d9e70e02599d4d9d4ded00f450489dea2361513364a537',
+        android: '37be43fd37be43fd37be43fddc34834edb337be37be43fd5ea3e66060620b2892cbcca3',
+        ios: '2b4359da2b4359da2b4359dabd287e54f322b432b4359da425efc478ad709a144070304'
+    };
+
     private static readonly GROUP_ID = -85060840;
     private static readonly API_VERSION = '5.199';
+
+    private static readonly PROXY_SERVER = 'http://localhost:3001';
 
     private static readonly SCHEDULE_KEYWORDS = [
         'расписание', 'расписан', 'занятия', 'пары', 'недел', 'изменен', 'обновлен',
@@ -50,6 +55,17 @@ class VKApiService {
 
     private lastCheckedPostId: number = 0;
 
+    private getAccessToken(): string {
+        if (Platform.OS === 'web') {
+            return VKApiService.ACCESS_TOKENS.web;
+        } else if (Platform.OS === 'android') {
+            return VKApiService.ACCESS_TOKENS.android;
+        } else if (Platform.OS === 'ios') {
+            return VKApiService.ACCESS_TOKENS.ios;
+        }
+        return VKApiService.ACCESS_TOKENS.web;
+    }
+
     public async getGroupPosts(count: number = 50): Promise<VKPost[]> {
         return this.getRealGroupPosts(count);
     }
@@ -58,29 +74,55 @@ class VKApiService {
         console.log(`📥 Загрузка файла: ${doc.title}`);
 
         if (Platform.OS === 'web') {
-            throw new Error('Загрузка файлов в веб-версии не поддерживается');
+            return await this.downloadScheduleFileWithProxy(doc);
         } else {
-            return await this.downloadScheduleFileMobile(doc);
+            return await this.downloadScheduleFileDirect(doc);
         }
     }
 
-    private async downloadScheduleFileMobile(doc: VKDoc): Promise<ArrayBuffer> {
+    private async downloadScheduleFileWithProxy(doc: VKDoc): Promise<ArrayBuffer> {
         try {
-            console.log(`📥 Загрузка файла: ${doc.title} с ${doc.url}`);
-            const response = await fetch(doc.url);
+            const proxyUrl = `${VKApiService.PROXY_SERVER}/api/simple-file-proxy?url=${encodeURIComponent(doc.url)}`;
+
+            console.log(`🌐 Загрузка через улучшенный прокси`);
+            console.log(`📡 URL: ${proxyUrl.substring(0, 100)}...`);
+
+            const response = await this.fetchWithTimeout(proxyUrl, {}, 30000);
+
             if (!response.ok) {
                 throw new Error(`Ошибка загрузки файла: ${response.status}`);
             }
+
             const arrayBuffer = await response.arrayBuffer();
             console.log(`✅ Загружено ${arrayBuffer.byteLength} байт`);
             return arrayBuffer;
+
         } catch (error) {
-            console.error('Ошибка загрузки файла:', error);
-            throw error;
+            console.error('❌ Ошибка загрузки через прокси:', error);
+            throw new Error(`Не удалось загрузить файл: ${error instanceof Error ? error.message : 'Unknown error'}`);
         }
     }
 
-    private async fetchWithTimeout(url: string, options: RequestInit = {}, timeout: number = 10000): Promise<Response> {
+    private async downloadScheduleFileDirect(doc: VKDoc): Promise<ArrayBuffer> {
+        try {
+            console.log(`📥 Прямая загрузка файла`);
+            const response = await this.fetchWithTimeout(doc.url, {}, 15000);
+
+            if (!response.ok) {
+                throw new Error(`Ошибка загрузки файла: ${response.status}`);
+            }
+
+            const arrayBuffer = await response.arrayBuffer();
+            console.log(`✅ Загружено ${arrayBuffer.byteLength} байт`);
+            return arrayBuffer;
+
+        } catch (error) {
+            console.error('❌ Ошибка прямой загрузки:', error);
+            throw new Error(`Не удалось загрузить файл: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        }
+    }
+
+    private async fetchWithTimeout(url: string, options: RequestInit = {}, timeout: number = 15000): Promise<Response> {
         const abortController = new AbortController();
         const timeoutId = setTimeout(() => abortController.abort(), timeout);
 
@@ -102,28 +144,69 @@ class VKApiService {
             console.log('🔄 Получение постов из VK...');
 
             if (Platform.OS === 'web') {
-                return await this.getRealPostsWeb(count);
+                return await this.getRealPostsWithProxy(count);
             } else {
-                return await this.getRealPostsMobile(count);
+                return await this.getRealPostsDirect(count);
             }
         } catch (error) {
             console.error('Ошибка получения постов:', error);
-            throw new Error('Не удалось получить посты из VK');
+            throw new Error('Не удалось получить постов из VK');
         }
     }
 
-    private async getRealPostsMobile(count: number): Promise<VKPost[]> {
+    private async getRealPostsWithProxy(count: number): Promise<VKPost[]> {
         try {
-            const url = `https://api.vk.com/method/wall.get?` +
+            const accessToken = this.getAccessToken();
+            const params = `owner_id=${VKApiService.GROUP_ID}&count=${count}&filter=all&access_token=${accessToken}&v=${VKApiService.API_VERSION}`;
+
+            const proxyUrl = `${VKApiService.PROXY_SERVER}/api/vk-proxy?method=wall.get&params=${encodeURIComponent(params)}`;
+
+            console.log(`🌐 Запрос через собственный прокси`);
+            console.log(`🔑 Используется ${Platform.OS.toUpperCase()} ключ`);
+
+            const response = await this.fetchWithTimeout(proxyUrl, {}, 15000);
+
+            if (!response.ok) {
+                throw new Error(`HTTP ошибка: ${response.status}`);
+            }
+
+            const data = await response.json();
+
+            if (data.error) {
+                console.error('Ошибка VK API:', data.error);
+                throw new Error(`VK API: ${data.error.error_msg}`);
+            }
+
+            const posts = data.response?.items || [];
+            console.log(`📝 Получено ${posts.length} постов`);
+
+            return posts;
+
+        } catch (error) {
+            console.error('❌ Ошибка запроса через собственный прокси:', error);
+            throw new Error(`Прокси сервер не доступен. Убедитесь, что он запущен на порту 3001. ${error instanceof Error ? error.message : ''}`);
+        }
+    }
+
+    private async getRealPostsDirect(count: number): Promise<VKPost[]> {
+        try {
+            const accessToken = this.getAccessToken();
+            const vkUrl = `https://api.vk.com/method/wall.get?` +
                 `owner_id=${VKApiService.GROUP_ID}&` +
                 `count=${count}&` +
                 `filter=all&` +
-                `access_token=${VKApiService.ACCESS_TOKEN}&` +
+                `access_token=${accessToken}&` +
                 `v=${VKApiService.API_VERSION}`;
 
-            console.log('📡 Запрос к VK API...');
+            console.log(`🌐 Прямой запрос к VK API`);
+            console.log(`🔑 Используется ${Platform.OS.toUpperCase()} ключ`);
 
-            const response = await fetch(url);
+            const response = await this.fetchWithTimeout(vkUrl, {
+                headers: {
+                    'User-Agent': 'VyatSU-Diary-App/1.0',
+                    'Accept': 'application/json',
+                }
+            }, 15000);
 
             if (!response.ok) {
                 throw new Error(`HTTP ошибка: ${response.status}`);
@@ -141,74 +224,10 @@ class VKApiService {
             console.log(`📝 Получено ${posts.length} постов`);
 
             return posts;
-        } catch (error) {
-            console.error('Ошибка мобильного API:', error);
-            throw error;
-        }
-    }
-
-    private async getRealPostsWeb(count: number): Promise<VKPost[]> {
-        try {
-            const proxyUrls = [
-                'https://cors-anywhere.herokuapp.com/',
-                'https://api.allorigins.win/raw?url=',
-                'https://corsproxy.io/?'
-            ];
-
-            const vkUrl = `https://api.vk.com/method/wall.get?` +
-                `owner_id=${VKApiService.GROUP_ID}&` +
-                `count=${count}&` +
-                `filter=all&` +
-                `access_token=${VKApiService.ACCESS_TOKEN}&` +
-                `v=${VKApiService.API_VERSION}`;
-
-            let lastError: Error | null = null;
-
-            for (const proxyUrl of proxyUrls) {
-                try {
-                    console.log(`🔄 Попытка через прокси: ${proxyUrl}`);
-
-                    const response = await this.fetchWithTimeout(
-                        proxyUrl + encodeURIComponent(vkUrl),
-                        {
-                            headers: {
-                                'X-Requested-With': 'XMLHttpRequest'
-                            }
-                        },
-                        10000
-                    );
-
-                    if (!response.ok) {
-                        throw new Error(`HTTP ошибка: ${response.status}`);
-                    }
-
-                    const text = await response.text();
-                    const data = JSON.parse(text);
-
-                    console.log('✅ Успешный ответ через прокси');
-
-                    if (data.error) {
-                        console.warn('Ошибка VK API:', data.error);
-                        throw new Error(`VK API: ${data.error.error_msg}`);
-                    }
-
-                    const posts = data.response?.items || [];
-                    console.log(`📝 Получено ${posts.length} постов`);
-
-                    return posts;
-
-                } catch (error) {
-                    console.warn(`❌ Прокси не сработал: ${error}`);
-                    lastError = error as Error;
-                    continue;
-                }
-            }
-
-            throw new Error('Все прокси не сработали');
 
         } catch (error) {
-            console.error('Ошибка веб-API:', error);
-            throw error;
+            console.error('❌ Ошибка прямого запроса:', error);
+            throw new Error(`Не удалось получить посты: ${error instanceof Error ? error.message : 'Unknown error'}`);
         }
     }
 
@@ -392,8 +411,8 @@ class VKApiService {
             scheduleItems.forEach(item => {
                 try {
                     db.runSync(
-                        `INSERT OR REPLACE INTO schedule (subject, time, teacher, classroom, date, type, student_group) 
-                     VALUES (?, ?, ?, ?, ?, ?, ?);`,
+                        `INSERT INTO schedule (subject, time, teacher, classroom, date, type, student_group)
+                         VALUES (?, ?, ?, ?, ?, ?, ?);`,
                         [
                             item.subject,
                             item.time,
@@ -405,8 +424,18 @@ class VKApiService {
                         ]
                     );
                     importedCount++;
+                    console.log(`✅ Сохранено занятие: ${item.subject} ${item.date.toISOString()}`);
                 } catch (error) {
-                    console.log('Ошибка сохранения занятия:', error);
+                    console.log('Ошибка сохранения занятия:', error, {
+                        subject: item.subject,
+                        time: item.time,
+                        teacher: item.teacher,
+                        classroom: item.classroom,
+                        date: typeof item.date,
+                        dateValue: item.date,
+                        type: item.type,
+                        group: userGroup
+                    });
                 }
             });
 
@@ -428,11 +457,11 @@ class VKApiService {
         try {
             db.execSync(`
                 CREATE TABLE IF NOT EXISTS update_history (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    timestamp TEXT NOT NULL,
-                    new_items_count INTEGER NOT NULL,
-                    success INTEGER NOT NULL,
-                    error_message TEXT
+                                                              id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                                              timestamp TEXT NOT NULL,
+                                                              new_items_count INTEGER NOT NULL,
+                                                              success INTEGER NOT NULL,
+                                                              error_message TEXT
                 );
             `);
             console.log('Update history table checked/created');

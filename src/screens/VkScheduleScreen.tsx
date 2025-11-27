@@ -15,7 +15,6 @@ const VkScheduleScreen: React.FC = () => {
     const [updateHistory, setUpdateHistory] = useState<any[]>([]);
     const isFocused = useIsFocused();
 
-    // Инициализация базы данных
     const initDatabase = () => {
         try {
             db.execSync(`
@@ -121,7 +120,6 @@ const VkScheduleScreen: React.FC = () => {
         }
     };
 
-    // В VkScheduleScreen.tsx обновите функцию checkForUpdates:
 
     const checkForUpdates = async () => {
         console.log('🔍 РЕАЛЬНАЯ проверка обновлений...');
@@ -132,13 +130,21 @@ const VkScheduleScreen: React.FC = () => {
             return;
         }
 
+        if (Platform.OS === 'web') {
+            Alert.alert(
+                'Веб-версия',
+                'В веб-версии используйте функцию "Весь семестр" для загрузки расписания или импортируйте Excel файл вручную',
+                [{ text: 'OK' }]
+            );
+            return;
+        }
+
         console.log('Запуск реальной проверки обновлений...');
         setChecking(true);
 
         try {
             let result: ScheduleUpdateResult;
 
-            // ВСЕГДА используем реальную проверку
             result = await vkApiService.checkForScheduleUpdates(userGroup);
 
             console.log('Результат проверки:', result);

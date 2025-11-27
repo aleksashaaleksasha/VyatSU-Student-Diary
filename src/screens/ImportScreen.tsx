@@ -1,11 +1,9 @@
-
 import React, { useState, useEffect } from 'react';
 import { View, StyleSheet, ScrollView, Alert, Platform } from 'react-native';
 import { Card, Title, Paragraph, Button, List, ActivityIndicator, Chip } from 'react-native-paper';
 import { ExcelScheduleParser } from '../utils/excelParser';
 import { db } from '../utils/databaseService';
 import { useNavigation } from '@react-navigation/native';
-
 
 interface ScheduleItem {
     subject: string;
@@ -23,6 +21,8 @@ const ImportScreen: React.FC = () => {
     const [userGroup, setUserGroup] = useState('');
     const [availableGroups, setAvailableGroups] = useState<string[]>([]);
     const navigation = useNavigation();
+
+    const isWeb = Platform.OS === 'web';
 
     useEffect(() => {
         loadUserGroup();
@@ -44,7 +44,6 @@ const ImportScreen: React.FC = () => {
         let importedCount = 0;
 
         try {
-            // УДАЛЯЕМ старые данные для тех же дат и группы перед добавлением новых
             const datesToUpdate = [...new Set(scheduleItems.map(item =>
                 item.date.toISOString().split('T')[0]
             ))];
@@ -61,12 +60,11 @@ const ImportScreen: React.FC = () => {
                 }
             });
 
-            // Добавляем новые данные
             scheduleItems.forEach(item => {
                 try {
                     db.runSync(
-                        `INSERT INTO schedule (subject, time, teacher, classroom, date, type, student_group) 
-                     VALUES (?, ?, ?, ?, ?, ?, ?);`,
+                        `INSERT INTO schedule (subject, time, teacher, classroom, date, type, student_group)
+                         VALUES (?, ?, ?, ?, ?, ?, ?);`,
                         [
                             item.subject,
                             item.time,
@@ -97,8 +95,7 @@ const ImportScreen: React.FC = () => {
             return;
         }
 
-        // Для Web используем альтернативный способ загрузки файлов
-        if (Platform.OS === 'web') {
+        if (isWeb) {
             Alert.alert(
                 'Веб-версия',
                 'В веб-версии используйте функцию обновления из VK или загрузите файл через мобильное приложение'
@@ -115,7 +112,6 @@ const ImportScreen: React.FC = () => {
 
             if (result.success) {
                 if (result.data.length > 0) {
-                    // Конвертируем ParsedScheduleItem в ScheduleItem
                     const scheduleItems: ScheduleItem[] = result.data.map(item => ({
                         subject: item.subject,
                         time: item.time,
@@ -128,7 +124,6 @@ const ImportScreen: React.FC = () => {
 
                     const importedCount = saveScheduleToDB(scheduleItems);
 
-                    // Добавляем в историю
                     const newHistoryItem = {
                         id: Date.now(),
                         title: `Импорт расписания`,
@@ -145,7 +140,6 @@ const ImportScreen: React.FC = () => {
                         [{
                             text: 'OK',
                             onPress: () => {
-                                // Принудительно обновляем экран расписания
                                 navigation.navigate('Расписание' as never);
                             }
                         }]
@@ -185,44 +179,60 @@ const ImportScreen: React.FC = () => {
 
     return (
         <ScrollView style={styles.container}>
-            <Card style={styles.card}>
-                <Card.Content>
-                    <Title>Импорт расписания</Title>
+            {!isWeb && (
+                <Card style={styles.card}>
+                    <Card.Content>
+                        <Title>Импорт расписания</Title>
 
-                    {userGroup ? (
-                        <Chip mode="outlined" style={styles.groupChip}>
-                            Группа: {userGroup}
-                        </Chip>
-                    ) : (
-                        <Paragraph style={styles.warningText}>
-                            Группа не выбрана. Сначала выберите группу в настройках.
+                        {userGroup ? (
+                            <Chip mode="outlined" style={styles.groupChip}>
+                                Группа: {userGroup}
+                            </Chip>
+                        ) : (
+                            <Paragraph style={styles.warningText}>
+                                Группа не выбрана. Сначала выберите группу в настройках.
+                            </Paragraph>
+                        )}
+
+                        <Paragraph>Выберите Excel файл для импорта расписания</Paragraph>
+
+                        {importing ? (
+                            <View style={styles.loadingContainer}>
+                                <ActivityIndicator size="large" color="#1E88E5" />
+                                <Paragraph style={styles.loadingText}>Импорт данных...</Paragraph>
+                            </View>
+                        ) : (
+                            <Button
+                                mode="contained"
+                                icon="file-import"
+                                style={styles.button}
+                                onPress={handleImportFromFile}
+                                disabled={importing || !userGroup}
+                            >
+                                Выбрать Excel файл
+                            </Button>
+                        )}
+
+                        <Paragraph style={styles.note}>
+                            Поддерживаются файлы в формате XLSX. Файл должен содержать расписание в стандартном формате ВятГУ.
                         </Paragraph>
-                    )}
+                    </Card.Content>
+                </Card>
+            )}
 
-                    <Paragraph>Выберите Excel файл для импорта расписания</Paragraph>
-
-                    {importing ? (
-                        <View style={styles.loadingContainer}>
-                            <ActivityIndicator size="large" color="#1E88E5" />
-                            <Paragraph style={styles.loadingText}>Импорт данных...</Paragraph>
-                        </View>
-                    ) : (
-                        <Button
-                            mode="contained"
-                            icon="file-import"
-                            style={styles.button}
-                            onPress={handleImportFromFile}
-                            disabled={importing || !userGroup}
-                        >
-                            Выбрать Excel файл
-                        </Button>
-                    )}
-
-                    <Paragraph style={styles.note}>
-                        Поддерживаются файлы в формате XLSX. Файл должен содержать расписание в стандартном формате ВятГУ.
-                    </Paragraph>
-                </Card.Content>
-            </Card>
+            {isWeb && (
+                <Card style={styles.card}>
+                    <Card.Content>
+                        <Title>Импорт расписания</Title>
+                        <Paragraph style={styles.webMessage}>
+                            В веб-версии приложения импорт через Excel файл недоступен.
+                        </Paragraph>
+                        <Paragraph style={styles.webMessage}>
+                            Для обновления расписания используйте функцию синхронизации через VK или воспользуйтесь мобильным приложением.
+                        </Paragraph>
+                    </Card.Content>
+                </Card>
+            )}
 
             <Card style={styles.card}>
                 <Card.Content>
@@ -311,6 +321,18 @@ const styles = StyleSheet.create({
         color: '#FF6B6B',
         fontStyle: 'italic',
         marginBottom: 12,
+    },
+    webMessage: {
+        textAlign: 'center',
+        color: '#666',
+        marginBottom: 8,
+    },
+    webImportCard: {
+        marginTop: 50,
+    },
+    webButton: {
+        marginVertical: 8,
+        backgroundColor: '#757575',
     },
 });
 

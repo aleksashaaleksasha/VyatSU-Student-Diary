@@ -40,13 +40,13 @@ interface ScheduleItem {
 interface ScheduleScreenProps {
     onRefreshPress?: () => void;
     refreshing?: boolean;
-    refreshTrigger?: number; // ДОБАВЛЕНО: триггер для обновления
+    refreshTrigger?: number;
 }
 
 const ScheduleScreen: React.FC<ScheduleScreenProps> = ({
                                                            onRefreshPress,
                                                            refreshing = false,
-                                                           refreshTrigger = 0 // ДОБАВЛЕНО: триггер по умолчанию
+                                                           refreshTrigger = 0
                                                        }) => {
     const [selectedDate, setSelectedDate] = useState(new Date());
     const [showDatePicker, setShowDatePicker] = useState(false);
@@ -88,7 +88,6 @@ const ScheduleScreen: React.FC<ScheduleScreenProps> = ({
         }
     }, [isFocused]);
 
-    // ДОБАВЛЕНО: Эффект для реакции на изменение триггера
     useEffect(() => {
         if (refreshTrigger > 0) {
             console.log('🔄 Triggering schedule refresh from parent, trigger:', refreshTrigger);
@@ -124,8 +123,18 @@ const ScheduleScreen: React.FC<ScheduleScreenProps> = ({
                 ...item,
                 date: new Date(item.date)
             }));
-            console.log('Loaded schedule items:', scheduleData.length);
-            setSchedule(scheduleData);
+
+            const uniqueSchedule = scheduleData.filter((item, index, self) =>
+                    index === self.findIndex(i =>
+                        i.id === item.id &&
+                        i.date.getTime() === item.date.getTime() &&
+                        i.time === item.time &&
+                        i.subject === item.subject
+                    )
+            );
+
+            console.log('Loaded schedule items:', uniqueSchedule.length);
+            setSchedule(uniqueSchedule);
         } catch (error) {
             console.log('Error loading schedule:', error);
         }
@@ -155,9 +164,8 @@ const ScheduleScreen: React.FC<ScheduleScreenProps> = ({
 
     const handleRefresh = () => {
         if (onRefreshPress) {
-            onRefreshPress(); // Используем callback из App.tsx
+            onRefreshPress();
         } else {
-            // Фолбэк для обратной совместимости
             loadScheduleFromDB();
             loadUserGroup();
             loadLastVkUpdate();
@@ -334,46 +342,36 @@ const ScheduleScreen: React.FC<ScheduleScreenProps> = ({
                     },
                 ]}
             >
-                <TouchableOpacity
-                    onLongPress={(event) => {
-                        setSelectedScheduleItem(item);
-                        const { pageX, pageY } = event.nativeEvent;
-                        setContextMenuAnchor({ x: pageX, y: pageY });
-                        setContextMenuVisible(true);
-                    }}
-                    delayLongPress={500}
-                >
-                    <Card style={styles.scheduleCard}>
-                        <View style={styles.cardContent}>
-                            <View style={styles.lessonHeader}>
-                                <View style={styles.timeSection}>
-                                    <Text style={styles.timeText}>{item.time}</Text>
-                                </View>
-                                <Chip
-                                    mode="flat"
-                                    style={[styles.typeChip, { backgroundColor: getTypeColor(item.type) + '15' }]}
-                                    textStyle={{
-                                        color: getTypeColor(item.type),
-                                        fontSize: 12,
-                                        fontWeight: '600',
-                                        lineHeight: 16,
-                                    }}
-                                >
-                                    {item.type}
-                                </Chip>
+                <Card style={styles.scheduleCard}>
+                    <View style={styles.cardContent}>
+                        <View style={styles.lessonHeader}>
+                            <View style={styles.timeSection}>
+                                <Text style={styles.timeText}>{item.time}</Text>
                             </View>
-
-                            <Text style={styles.subjectTitle}>{item.subject}</Text>
-
-                            <View style={styles.detailsRow}>
-                                <Text style={styles.teacherText} numberOfLines={1}>{item.teacher}</Text>
-                                <Text style={styles.classroomText}>
-                                    {classrooms.join(', ')}
-                                </Text>
-                            </View>
+                            <Chip
+                                mode="flat"
+                                style={[styles.typeChip, { backgroundColor: getTypeColor(item.type) + '15' }]}
+                                textStyle={{
+                                    color: getTypeColor(item.type),
+                                    fontSize: 12,
+                                    fontWeight: '600',
+                                    lineHeight: 16,
+                                }}
+                            >
+                                {item.type}
+                            </Chip>
                         </View>
-                    </Card>
-                </TouchableOpacity>
+
+                        <Text style={styles.subjectTitle}>{item.subject}</Text>
+
+                        <View style={styles.detailsRow}>
+                            <Text style={styles.teacherText} numberOfLines={1}>{item.teacher}</Text>
+                            <Text style={styles.classroomText}>
+                                {classrooms.join(', ')}
+                            </Text>
+                        </View>
+                    </View>
+                </Card>
             </Animated.View>
         );
     };
@@ -386,7 +384,6 @@ const ScheduleScreen: React.FC<ScheduleScreenProps> = ({
                     style={styles.headerGradient}
                 >
 
-                    {/* ИЗМЕНЕНО: Дата и информация об обновлении в одном блоке */}
                     <View style={styles.dateHeader}>
                         <Button
                             icon="chevron-left"
@@ -405,7 +402,6 @@ const ScheduleScreen: React.FC<ScheduleScreenProps> = ({
                             <Text style={styles.dateNumber}>
                                 {format(selectedDate, 'd MMMM yyyy', { locale: ru })}
                             </Text>
-                            {/* ИЗМЕНЕНО: Дата обновления под основной датой */}
                             {lastVkUpdate && isValid(lastVkUpdate) && (
                                 <Text style={styles.lastUpdateText}>
                                     Обновлено: {format(lastVkUpdate, 'dd.MM.yyyy HH:mm', { locale: ru })}
@@ -464,7 +460,6 @@ const ScheduleScreen: React.FC<ScheduleScreenProps> = ({
                         <Text style={styles.sectionTitle}>
                             {format(selectedDate, 'EEEE', { locale: ru }).charAt(0).toUpperCase() + format(selectedDate, 'EEEE', { locale: ru }).slice(1)}
                         </Text>
-                        {/* УБРАНО: индикатор обновления из строки дня недели */}
                     </View>
 
                     {filteredSchedule.length === 0 ? (
@@ -486,7 +481,7 @@ const ScheduleScreen: React.FC<ScheduleScreenProps> = ({
                     ) : (
                         <FlatList
                             data={filteredSchedule}
-                            keyExtractor={item => item.id.toString()}
+                            keyExtractor={item => `schedule-${item.id}-${new Date(item.date).getTime()}-${item.time}-${item.subject}`}
                             renderItem={renderScheduleItem}
                             contentContainerStyle={styles.scheduleList}
                             showsVerticalScrollIndicator={false}
@@ -495,7 +490,6 @@ const ScheduleScreen: React.FC<ScheduleScreenProps> = ({
                     )}
                 </View>
 
-                {/* ДОБАВЛЕНО: Модальное окно для индикатора обновления */}
                 <Portal>
                     <Modal
                         visible={refreshing}
@@ -516,7 +510,6 @@ const ScheduleScreen: React.FC<ScheduleScreenProps> = ({
                     </Modal>
                 </Portal>
 
-                {/* Остальные Portal компоненты остаются без изменений */}
                 <Portal>
                     <Menu
                         visible={contextMenuVisible}
@@ -696,22 +689,14 @@ const styles = StyleSheet.create({
         paddingBottom: 12,
         borderBottomLeftRadius: 20,
         borderBottomRightRadius: 20,
-    },
-    headerTopRow: {
-        flexDirection: 'row',
-        justifyContent: 'center',
-        alignItems: 'center',
-        paddingHorizontal: 16,
-        paddingTop: 2,
-        paddingBottom: 2,
-        position: 'relative',
+        marginTop: 0,
     },
     dateHeader: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
         paddingHorizontal: 16,
-
+        paddingTop: 8,
     },
     navButton: {
         margin: 0,
@@ -728,7 +713,6 @@ const styles = StyleSheet.create({
         fontWeight: '700',
         marginTop: 2,
     },
-    // ИЗМЕНЕНО: Стиль для даты обновления под основной датой
     lastUpdateText: {
         color: '#FFFFFF',
         fontSize: 12,
@@ -755,7 +739,6 @@ const styles = StyleSheet.create({
         textAlign: 'center',
         flex: 1,
     },
-    // УБРАНО: стили для индикатора обновления в строке
     scheduleList: {
         paddingBottom: 20,
     },
@@ -850,7 +833,6 @@ const styles = StyleSheet.create({
         borderColor: '#6366F1',
         marginBottom: 8,
     },
-    // ДОБАВЛЕНО: Стили для модального окна загрузки
     loadingModalContainer: {
         margin: 40,
     },

@@ -1,8 +1,7 @@
-// HomeScreen.tsx
 import React, { useState } from 'react';
 import { View, StyleSheet, ScrollView, Dimensions } from 'react-native';
 import { Card, Title, Text, FAB } from 'react-native-paper';
-import { format, addDays, subDays, eachDayOfInterval, startOfWeek, endOfWeek } from 'date-fns';
+import { format, addDays, subDays } from 'date-fns';
 import { ru } from 'date-fns/locale';
 
 const { width } = Dimensions.get('window');

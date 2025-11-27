@@ -18,14 +18,12 @@ import { db } from './src/utils/databaseService';
 const Tab = createBottomTabNavigator();
 const Stack = createStackNavigator();
 
-// ЕДИНЫЕ СТИЛИ ДЛЯ ЗАГОЛОВКОВ
 const HEADER_TITLE_STYLE = {
     fontSize: 20,
     fontWeight: '700' as const,
     color: '#FFFFFF',
 };
 
-// Кастомная цветовая схема
 const colorScheme = {
     primary: '#6366F1',
     primaryLight: '#A5B4FC',
@@ -40,7 +38,6 @@ const colorScheme = {
     outline: '#E2E8F0',
 };
 
-// Кастомные шрифты
 const fontConfig = {
     displayLarge: {
         fontFamily: 'System',
@@ -199,7 +196,7 @@ const SettingsStack = () => (
                 shadowOpacity: 0,
             },
             headerTintColor: '#FFFFFF',
-            headerTitleStyle: HEADER_TITLE_STYLE, // ЕДИНЫЙ СТИЛЬ
+            headerTitleStyle: HEADER_TITLE_STYLE,
             headerTitleAlign: 'center' as const,
             cardStyle: {
                 backgroundColor: colorScheme.background,
@@ -238,7 +235,6 @@ const SettingsStack = () => (
     </Stack.Navigator>
 );
 
-// Кастомный хедер для экрана расписания
 const ScheduleHeader = ({ onRefresh, refreshing }: { onRefresh: () => void; refreshing: boolean }) => {
     return (
         <SafeAreaView style={{ backgroundColor: colorScheme.primary }} edges={['top']}>
@@ -251,7 +247,6 @@ const ScheduleHeader = ({ onRefresh, refreshing }: { onRefresh: () => void; refr
                 paddingHorizontal: 16,
                 paddingTop: 0,
             }}>
-                {/* Заголовок по центру с ЕДИНЫМ СТИЛЕМ */}
                 <Text style={[HEADER_TITLE_STYLE, {
                     flex: 1,
                     textAlign: 'center',
@@ -260,7 +255,6 @@ const ScheduleHeader = ({ onRefresh, refreshing }: { onRefresh: () => void; refr
                     Расписание
                 </Text>
 
-                {/* Кнопка обновления справа */}
                 <TouchableOpacity
                     onPress={onRefresh}
                     disabled={refreshing}
@@ -286,10 +280,8 @@ export default function App() {
     const [refreshingSchedule, setRefreshingSchedule] = useState(false);
     const [refreshTrigger, setRefreshTrigger] = useState(0);
 
-    // Функция для проверки обновлений из VK
     const checkVkUpdates = async () => {
         try {
-            // Загружаем группу пользователя
             const userGroupResult = db.getFirstSync('SELECT value FROM settings WHERE key = "user_group"') as any;
             const userGroup = userGroupResult?.value;
 
@@ -302,10 +294,18 @@ export default function App() {
 
             console.log('🔄 Проверка обновлений из VK...');
 
-            // ВСЕГДА используем реальную проверку обновлений
+            if (Platform.OS === 'web') {
+                Alert.alert(
+                    'Веб-версия',
+                    'В веб-версии используйте раздел "Обновление из VK" в настройках для загрузки расписания',
+                    [{ text: 'OK' }]
+                );
+                setRefreshingSchedule(false);
+                return;
+            }
+
             const result = await vkApiService.checkForScheduleUpdates(userGroup);
 
-            // Сохраняем историю обновлений
             if (result.success) {
                 db.runSync(
                     `INSERT INTO update_history (timestamp, new_items_count, success, error_message)
@@ -313,13 +313,11 @@ export default function App() {
                     [new Date().toISOString(), result.newScheduleCount, result.success ? 1 : 0, result.error || '']
                 );
 
-                // Сохраняем дату последнего обновления
                 db.runSync(
                     `INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)`,
                     ['last_vk_update', result.lastUpdate.toISOString()]
                 );
 
-                // ДОБАВЛЕНО: Триггерим обновление данных в ScheduleScreen
                 if (result.newScheduleCount > 0) {
                     setRefreshTrigger(prev => prev + 1);
                     Alert.alert(
@@ -335,7 +333,6 @@ export default function App() {
         } catch (error) {
             console.error('VK update check error:', error);
             Alert.alert('Ошибка', 'Произошла ошибка при проверке обновлений');
-        } finally {
             setRefreshingSchedule(false);
         }
     };
@@ -350,7 +347,7 @@ export default function App() {
                             screenOptions={({ route }) => ({
                                 tabBarIcon: ({ focused, color, size }) => {
                                     let iconName: any;
-                                    let iconColor = '#64748B'; // значение по умолчанию
+                                    let iconColor = '#64748B';
 
                                     if (route.name === 'Расписание') {
                                         iconName = focused ? 'calendar' : 'calendar-outline';
@@ -366,7 +363,7 @@ export default function App() {
                                     return <Ionicons name={iconName} size={size} color={iconColor} />;
                                 },
                                 tabBarLabel: ({ focused, color, position, children }) => {
-                                    let labelColor = '#64748B'; // значение по умолчанию
+                                    let labelColor = '#64748B';
 
                                     if (route.name === 'Расписание') {
                                         labelColor = focused ? '#6366F1' : '#64748B';
@@ -415,7 +412,6 @@ export default function App() {
                                 headerTitleAlign: 'center' as const,
                             })}
                         >
-                            {/* Остальной код Tab.Screen без изменений */}
                             <Tab.Screen
                                 name="Расписание"
                                 children={() => (

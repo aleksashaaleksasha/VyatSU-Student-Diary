@@ -5,7 +5,8 @@ import {
     ScrollView,
     Alert,
     TouchableOpacity,
-    Text
+    Text,
+    Platform
 } from 'react-native';
 import { Card, Title, Paragraph, Button, TextInput, Modal, Portal, Chip } from 'react-native-paper';
 import { useNavigation } from '@react-navigation/native';
@@ -141,14 +142,12 @@ const SettingsScreen = () => {
 
     return (
         <View style={styles.container}>
-            {/* Хедер с синим градиентом */}
             <LinearGradient
                 colors={['#1E88E5', '#42A5F5']}
                 style={styles.headerGradient}
             >
                 <View style={styles.headerTopRow}>
                     <View style={styles.groupContainer}>
-                        {/* НАЗВАНИЕ ГРУППЫ ПО ЦЕНТРУ, ИКОНКА СПРАВА */}
                         <TouchableOpacity
                             style={styles.groupRow}
                             onPress={showGroupModal}
@@ -171,22 +170,24 @@ const SettingsScreen = () => {
                 contentContainerStyle={styles.scrollContent}
                 showsVerticalScrollIndicator={true}
             >
-                <Card style={styles.card}>
-                    <Card.Content>
-                        <Title style={styles.cardTitle}>Импорт расписания</Title>
-                        <Paragraph style={styles.cardDescription}>Загрузите расписание из Excel файла</Paragraph>
+                {Platform.OS !== 'web' && (
+                    <Card style={styles.card}>
+                        <Card.Content>
+                            <Title style={styles.cardTitle}>Импорт расписания</Title>
+                            <Paragraph style={styles.cardDescription}>Загрузите расписание из Excel файла</Paragraph>
 
-                        <Button
-                            mode="contained"
-                            icon="file-import"
-                            onPress={() => navigation.navigate('Import' as never)}
-                            style={styles.button}
-                            buttonColor="#1E88E5"
-                        >
-                            Импорт из Excel
-                        </Button>
-                    </Card.Content>
-                </Card>
+                            <Button
+                                mode="contained"
+                                icon="file-import"
+                                onPress={() => navigation.navigate('Import' as never)}
+                                style={styles.button}
+                                buttonColor="#1E88E5"
+                            >
+                                Импорт из Excel
+                            </Button>
+                        </Card.Content>
+                    </Card>
+                )}
 
                 <Card style={styles.card}>
                     <Card.Content>
@@ -224,7 +225,6 @@ const SettingsScreen = () => {
                 <View style={styles.bottomSpacer} />
             </ScrollView>
 
-            {/* МОДАЛЬНОЕ ОКНО ВЫБОРА ГРУППЫ */}
             <Portal>
                 <Modal
                     visible={groupModalVisible}
@@ -315,6 +315,7 @@ const styles = StyleSheet.create({
         paddingBottom: 12,
         borderBottomLeftRadius: 20,
         borderBottomRightRadius: 20,
+        marginTop: 0,
     },
     headerTopRow: {
         flexDirection: 'row',
@@ -328,7 +329,6 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         width: '100%',
     },
-    // НАЗВАНИЕ ГРУППЫ ПО ЦЕНТРУ, ИКОНКА СПРАВА
     groupRow: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -392,7 +392,6 @@ const styles = StyleSheet.create({
     bottomSpacer: {
         height: 40,
     },
-    // СТИЛИ ДЛЯ МОДАЛЬНОГО ОКНА
     modalContainer: {
         margin: 20,
         borderRadius: 20,
